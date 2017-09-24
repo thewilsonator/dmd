@@ -6506,17 +6506,20 @@ extern (C++) final class CallExp : UnaExp
     extern (D) this(Loc loc, Expression e, Expressions* exps)
     {
         super(loc, TOKcall, __traits(classInstanceSize, CallExp), e);
+        f = cast(FuncDeclaration)(cast(VarExp)e).var;
         this.arguments = exps;
     }
 
     extern (D) this(Loc loc, Expression e)
     {
         super(loc, TOKcall, __traits(classInstanceSize, CallExp), e);
+        f = cast(FuncDeclaration)(cast(VarExp)e).var;
     }
 
     extern (D) this(Loc loc, Expression e, Expression earg1)
     {
         super(loc, TOKcall, __traits(classInstanceSize, CallExp), e);
+        f = cast(FuncDeclaration)(cast(VarExp)e).var;
         auto arguments = new Expressions();
         if (earg1)
         {
@@ -6529,6 +6532,7 @@ extern (C++) final class CallExp : UnaExp
     extern (D) this(Loc loc, Expression e, Expression earg1, Expression earg2)
     {
         super(loc, TOKcall, __traits(classInstanceSize, CallExp), e);
+        f = cast(FuncDeclaration)(cast(VarExp)e).var;
         auto arguments = new Expressions();
         arguments.setDim(2);
         (*arguments)[0] = earg1;
