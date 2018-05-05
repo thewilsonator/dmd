@@ -328,7 +328,7 @@ extern (C++) Expression eval_yl2xp1(Loc loc, FuncDeclaration fd, Expressions* ar
 
 public extern (C++) void builtin_init()
 {
-    builtins._init(47);
+    builtins._init(128);
     // @safe @nogc pure nothrow real function(real)
     add_builtin("_D4core4math3sinFNaNbNiNfeZe", &eval_sin);
     add_builtin("_D4core4math3cosFNaNbNiNfeZe", &eval_cos);
@@ -337,35 +337,38 @@ public extern (C++) void builtin_init()
     add_builtin("_D4core4math4fabsFNaNbNiNfeZe", &eval_fabs);
     add_builtin("_D4core4math5expm1FNaNbNiNfeZe", &eval_unimp);
     add_builtin("_D4core4math4exp2FNaNbNiNfeZe", &eval_unimp);
-    // @trusted @nogc pure nothrow real function(real)
-    add_builtin("_D4core4math3sinFNaNbNiNeeZe", &eval_sin);
-    add_builtin("_D4core4math3cosFNaNbNiNeeZe", &eval_cos);
-    add_builtin("_D4core4math3tanFNaNbNiNeeZe", &eval_tan);
-    add_builtin("_D4core4math4sqrtFNaNbNiNeeZe", &eval_sqrt);
-    add_builtin("_D4core4math4fabsFNaNbNiNeeZe", &eval_fabs);
-    add_builtin("_D4core4math5expm1FNaNbNiNeeZe", &eval_unimp);
+    
     // @safe @nogc pure nothrow double function(double)
+    add_builtin("_D4core4math3sinFNaNbNiNfdZd", &eval_sin);
+    add_builtin("_D4core4math3cosFNaNbNiNfdZd", &eval_cos);
+    add_builtin("_D4core4math3tanFNaNbNiNfdZd", &eval_tan);
     add_builtin("_D4core4math4sqrtFNaNbNiNfdZd", &eval_sqrt);
+    add_builtin("_D4core4math4fabsFNaNbNiNfdZd", &eval_fabs);
+    add_builtin("_D4core4math5expm1FNaNbNiNfdZd", &eval_unimp);
+    add_builtin("_D4core4math4exp2FNaNbNiNfdZd", &eval_unimp);
     // @safe @nogc pure nothrow float function(float)
+    add_builtin("_D4core4math3sinFNaNbNiNffZf", &eval_sin);
+    add_builtin("_D4core4math3cosFNaNbNiNffZf", &eval_cos);
+    add_builtin("_D4core4math3tanFNaNbNiNffZf", &eval_tan);
     add_builtin("_D4core4math4sqrtFNaNbNiNffZf", &eval_sqrt);
+    add_builtin("_D4core4math4fabsFNaNbNiNffZf", &eval_fabs);
+    add_builtin("_D4core4math5expm1FNaNbNiNffZ", &eval_unimp);
+    add_builtin("_D4core4math4exp2FNaNbNiNffZf", &eval_unimp);
     // @safe @nogc pure nothrow real function(real, real)
     add_builtin("_D4core4math5atan2FNaNbNiNfeeZe", &eval_unimp);
-    if (CTFloat.yl2x_supported)
-    {
-        add_builtin("_D4core4math4yl2xFNaNbNiNfeeZe", &eval_yl2x);
-    }
-    else
-    {
-        add_builtin("_D4core4math4yl2xFNaNbNiNfeeZe", &eval_unimp);
-    }
-    if (CTFloat.yl2xp1_supported)
-    {
-        add_builtin("_D4core4math6yl2xp1FNaNbNiNfeeZe", &eval_yl2xp1);
-    }
-    else
-    {
-        add_builtin("_D4core4math6yl2xp1FNaNbNiNfeeZe", &eval_unimp);
-    }
+    
+    auto yl2x = CTFloat.yl2x_supported ? &eval_yl2x : &eval_unimp);
+    
+    add_builtin("_D4core4math4yl2xFNaNbNiNfddZd", yl2x);
+    add_builtin("_D4core4math4yl2xFNaNbNiNfeeZe", yl2x);
+    add_builtin("_D4core4math4yl2xFNaNbNiNfffZf", yl2x);
+    
+    auto yl2xp1 = CTFloat.yl2xp1_supported ? &eval_yl2xp1 : &eval_unimp);
+    
+    add_builtin("_D4core4math6yl2xp1FNaNbNiNfeeZe", yl2xp1);
+    add_builtin("_D4core4math6yl2xp1FNaNbNiNfeeZe", yl2xp1);
+    add_builtin("_D4core4math6yl2xp1FNaNbNiNfeeZe", yl2xp1);
+    
     // @safe @nogc pure nothrow long function(real)
     add_builtin("_D4core4math6rndtolFNaNbNiNfeZl", &eval_unimp);
     // @safe @nogc pure nothrow real function(real)
