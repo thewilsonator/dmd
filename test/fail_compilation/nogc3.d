@@ -25,8 +25,8 @@ void barCall();
 /*
 TEST_OUTPUT:
 ---
-fail_compilation/nogc3.d(35): Error: `@nogc` function `nogc3.testCall` cannot call non-`@nogc` function pointer `fp`
-fail_compilation/nogc3.d(36): Error: @nogc function 'nogc3.testCall' cannot call non-@nogc function 'nogc3.barCall'
+fail_compilation/nogc3.d(35): Error: `@nogc` function `nogc3.testCall` cannot call non-@nogc function pointer `fp`
+fail_compilation/nogc3.d(36): Error: `@nogc` function `nogc3.testCall` cannot call non-@nogc function `nogc3.barCall`
 ---
 */
 @nogc void testCall()
@@ -44,9 +44,9 @@ fail_compilation/nogc3.d(36): Error: @nogc function 'nogc3.testCall' cannot call
 /*
 TEST_OUTPUT:
 ---
-fail_compilation/nogc3.d(53): Error: function nogc3.testClosure1 is @nogc yet allocates closures with the GC
+fail_compilation/nogc3.d(53): Error: function `nogc3.testClosure1` is `@nogc` yet allocates closures with the GC
 fail_compilation/nogc3.d(56):        nogc3.testClosure1.bar closes over variable x at fail_compilation/nogc3.d(55)
-fail_compilation/nogc3.d(65): Error: function nogc3.testClosure3 is @nogc yet allocates closures with the GC
+fail_compilation/nogc3.d(65): Error: function `nogc3.testClosure3` is `@nogc` yet allocates closures with the GC
 fail_compilation/nogc3.d(68):        nogc3.testClosure3.bar closes over variable x at fail_compilation/nogc3.d(67)
 ---
 */

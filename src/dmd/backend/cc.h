@@ -77,7 +77,7 @@ enum WM
         WM_badnumber    = 24,
         WM_ccast        = 25,
         WM_obsolete     = 26,
-#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
+#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_DRAGONFLYBSD || TARGET_SOLARIS
         WM_skip_attribute   = 27, // skip GNUC attribute specification
         WM_warning_message  = 28, // preprocessor warning message
         WM_bad_vastart      = 29, // args for builtin va_start bad
@@ -106,7 +106,7 @@ enum LANG
 #include        "msgs2.h"
 #endif
 #include        "ty.h"
-#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
+#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_DRAGONFLYBSD || TARGET_SOLARIS
 #include        "../tk/mem.h"
 #else
 #include        "mem.h"
@@ -1159,6 +1159,7 @@ enum
     SFLnodebug      = 0x20000,     // don't generate debug info
     SFLwasstatic    = 0x800000,    // was an uninitialized static
     SFLweak         = 0x1000000,   // resolve to NULL if not found
+    SFLhidden       = 0x2000000,   // not visible outside of DSOs (-fvisibility=hidden)
     SFLartifical    = 0x4000000,   // compiler generated symbol
 
     // CPP
@@ -1181,7 +1182,7 @@ enum
     // OPTIMIZER and CODGEN
     GTregcand       = 0x100,       // if Symbol is a register candidate
     SFLdead         = 0x800,       // this variable is dead
-    GTunregister    = 0x2000000,   // 'unregister' a previous register assignment
+    GTunregister    = 0x8000000,   // 'unregister' a previous register assignment
 
     // OPTIMIZER only
     SFLunambig      = 0x400,       // only accessible by unambiguous reference,

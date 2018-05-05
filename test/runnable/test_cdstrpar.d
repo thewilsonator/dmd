@@ -1,4 +1,4 @@
-// REQUIRED_ARGS: -O
+// REQUIRED_ARGS: -O -fPIC
 // PERMUTE_ARGS:
 // only testing on SYSV-ABI, but backend code is identical across platforms
 // DISABLED: win32 win64 osx linux32 freebsd32
@@ -6,7 +6,7 @@ debug = PRINTF;
 debug (PRINTF) import core.stdc.stdio;
 
 // Run this after codegen changes:
-// env DMD=generated/linux/release/64/dmd rdmd -version=update test/runnable/test_cdstrpar.d
+// env DMD=generated/linux/release/64/dmd rdmd -fPIC -version=update test/runnable/test_cdstrpar.d
 version (update)
 {
     import std.algorithm : canFind, find, splitter, until;
@@ -47,7 +47,7 @@ version (update)
         auto sink = appender!string();
         foreach (arch; [EnumMembers!Arch])
         {
-            auto args = [dmd, "-c", "-O", "-mcpu=" ~ arch.to!string, __FILE__];
+            auto args = [dmd, "-c", "-O", "-fPIC", "-mcpu=" ~ arch.to!string, __FILE__];
             auto rc = execute(args);
             enforce(rc.status == 0, rc.output);
             formattedWrite(sink, "alias %sCases = AliasSeq!(\n", arch);
@@ -76,8 +76,8 @@ version (update)
             auto content = src.readText;
             auto f = File(src, "w");
             auto orng = f.lockingTextWriter;
-            immutable string start = "// begin";
-            immutable string end = "// end";
+            immutable string start = "// dfmt off";
+            immutable string end = "// dfmt on";
             replaceFirstInto!((_, orng) => formattedWrite(orng, start ~ "\n%s" ~ end, sink.data))(orng,
                     content, ctRegex!(`^` ~ start ~ `[^$]*` ~ end ~ `$`, "m"));
         }
@@ -118,54 +118,32 @@ struct Code(T_, int N_)
 alias AliasSeq(Args...) = Args;
 
 // dfmt off
-// begin
 alias baselineCases = AliasSeq!(
     Code!(ubyte, 4)([
         /* push   rbp                     */ 0x55,
         /* mov    rbp,rsp                 */ 0x48, 0x8b, 0xec,
-        /* sub    rsp,0x10                */ 0x48, 0x83, 0xec, 0x10,
-        /* sub    rsp,0x8                 */ 0x48, 0x83, 0xec, 0x08,
-        /* sub    rsp,0x8                 */ 0x48, 0x83, 0xec, 0x08,
-        /* lea    rdi,[rbp-0x8]           */ 0x48, 0x8d, 0x7d, 0xf8,
-        /* call   19 <testee_ubyte_4+0x19> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
-        /* add    rsp,0x8                 */ 0x48, 0x83, 0xc4, 0x08,
-        /* mov    rsi,rax                 */ 0x48, 0x89, 0xc6,
-        /* push   QWORD PTR [rsi]         */ 0xff, 0x36,
-        /* call   27 <testee_ubyte_4+0x27> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
-        /* add    rsp,0x10                */ 0x48, 0x83, 0xc4, 0x10,
-        /* mov    rsp,rbp                 */ 0x48, 0x8b, 0xe5,
+        /* call   9 <testee_ubyte_4+0x9>  */ 0xe8, 0x00, 0x00, 0x00, 0x00,
+        /* mov    rdi,rax                 */ 0x48, 0x89, 0xc7,
+        /* call   11 <testee_ubyte_4+0x11> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
         /* pop    rbp                     */ 0x5d,
         /* ret                            */ 0xc3,
     ]),
     Code!(ubyte, 8)([
         /* push   rbp                     */ 0x55,
         /* mov    rbp,rsp                 */ 0x48, 0x8b, 0xec,
-        /* sub    rsp,0x10                */ 0x48, 0x83, 0xec, 0x10,
-        /* sub    rsp,0x8                 */ 0x48, 0x83, 0xec, 0x08,
-        /* sub    rsp,0x8                 */ 0x48, 0x83, 0xec, 0x08,
-        /* lea    rdi,[rbp-0x8]           */ 0x48, 0x8d, 0x7d, 0xf8,
-        /* call   19 <testee_ubyte_8+0x19> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
-        /* add    rsp,0x8                 */ 0x48, 0x83, 0xc4, 0x08,
-        /* mov    rsi,rax                 */ 0x48, 0x89, 0xc6,
-        /* push   QWORD PTR [rsi]         */ 0xff, 0x36,
-        /* call   27 <testee_ubyte_8+0x27> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
-        /* add    rsp,0x10                */ 0x48, 0x83, 0xc4, 0x10,
-        /* mov    rsp,rbp                 */ 0x48, 0x8b, 0xe5,
+        /* call   9 <testee_ubyte_8+0x9>  */ 0xe8, 0x00, 0x00, 0x00, 0x00,
+        /* mov    rdi,rax                 */ 0x48, 0x89, 0xc7,
+        /* call   11 <testee_ubyte_8+0x11> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
         /* pop    rbp                     */ 0x5d,
         /* ret                            */ 0xc3,
     ]),
     Code!(ubyte, 16)([
         /* push   rbp                     */ 0x55,
         /* mov    rbp,rsp                 */ 0x48, 0x8b, 0xec,
-        /* sub    rsp,0x10                */ 0x48, 0x83, 0xec, 0x10,
-        /* lea    rdi,[rbp-0x10]          */ 0x48, 0x8d, 0x7d, 0xf0,
-        /* call   11 <testee_ubyte_16+0x11> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
-        /* mov    rsi,rax                 */ 0x48, 0x89, 0xc6,
-        /* push   QWORD PTR [rsi+0x8]     */ 0xff, 0x76, 0x08,
-        /* push   QWORD PTR [rsi]         */ 0xff, 0x36,
-        /* call   1e <testee_ubyte_16+0x1e> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
-        /* add    rsp,0x10                */ 0x48, 0x83, 0xc4, 0x10,
-        /* mov    rsp,rbp                 */ 0x48, 0x8b, 0xe5,
+        /* call   9 <testee_ubyte_16+0x9> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
+        /* mov    rdi,rax                 */ 0x48, 0x89, 0xc7,
+        /* mov    rsi,rdx                 */ 0x48, 0x89, 0xd6,
+        /* call   14 <testee_ubyte_16+0x14> */ 0xe8, 0x00, 0x00, 0x00, 0x00,
         /* pop    rbp                     */ 0x5d,
         /* ret                            */ 0xc3,
     ]),
@@ -209,7 +187,6 @@ alias baselineCases = AliasSeq!(
     ]),
 );
 
-// end
 // dfmt on
 
 bool matches(const(ubyte)[] code, const(ubyte)[] exp)
@@ -235,7 +212,7 @@ alias testCases = AliasSeq!(baselineCases);
 void main()
 {
     foreach (tc; testCases)
-    {
+    (){ // workaround Issue 7157
         auto code = (cast(ubyte*)&testee!(tc.T, tc.N))[0 .. tc.code.length];
         bool failure;
         if (!code.matches(tc.code))
@@ -262,5 +239,5 @@ void main()
             failure = true;
         }
         assert(!failure);
-    }
+    }();
 }

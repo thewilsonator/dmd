@@ -48,6 +48,7 @@ extern elem * evalu8(elem *, goal_t goal);
 
 static bool again;
 static bool topair;
+static tym_t global_tyf;
 
 /*****************************
  */
@@ -473,14 +474,14 @@ STATIC elem *fixconvop(elem *e)
         elem *ex = e;
         elem **pe = &e;
         while (OTconv(ed->Eoper))
-        {   unsigned copx = ed->Eoper;
-
-            unsigned icop = invconvtab[convidx(copx)];
+        {
+            const unsigned copx = ed->Eoper;
+            const unsigned icopx = invconvtab[convidx(copx)];
             tym_t tymx = ex->E1->E1->Ety;
             ex->E1 = el_selecte1(ex->E1);       // dump it for now
             e1 = ex->E1;
             e1->Ety = tymx;
-            ex->E2 = el_una(icop,e1->Ety,ex->E2);
+            ex->E2 = el_una(icopx,e1->Ety,ex->E2);
             ex->Ety = tymx;
             tym = tymx;
 
@@ -1391,6 +1392,7 @@ STATIC elem * elbitwise(elem *e, goal_t goal)
             ELCONST(e1->E1,1) &&
             (((e12 = e1->E2)->Eoper == OP64_32 ? (e12 = e12->E1) : e12)->Eoper == OPand) &&
             ELCONST(e12->E2,sz * 8 - 1) &&
+            tysize(e12->Ety) <= sz &&
 
             e2->Eoper == OPind &&
             e2->E1->Eoper == OPadd &&
@@ -1428,7 +1430,7 @@ STATIC elem * elbitwise(elem *e, goal_t goal)
             ELCONST(e1->E1,1) &&
             tysize(e->E1->Ety) <= REGSIZE)
         {
-            int sz = tysize(e->E1->Ety);
+            const int sz1 = tysize(e->E1->Ety);
             e->Eoper = OPbtst;
             e->Ety = TYbool;
             e->E1 = e2;
@@ -1437,11 +1439,11 @@ STATIC elem * elbitwise(elem *e, goal_t goal)
             e1->E2 = NULL;
             el_free(e1);
 
-            if (sz >= 2)
+            if (sz1 >= 2)
                 e = el_una(OPu8_16, TYushort, e);
-            if (sz >= 4)
+            if (sz1 >= 4)
                 e = el_una(OPu16_32, TYulong, e);
-            if (sz >= 8)
+            if (sz1 >= 8)
                 e = el_una(OPu32_64, TYullong, e);
 
             return optelem(e, goal);
@@ -3054,9 +3056,9 @@ STATIC elem * eladdr(elem *e, goal_t goal)
             //  & (*p1 = e) => ((*(t = p1) = e), t)
             else if (e1->E1->Eoper == OPind)
             {
-                tym_t tym = e1->E1->E1->Ety;
-                elem *tmp = el_alloctmp(tym);
-                e1->E1->E1 = el_bin(OPeq,tym,tmp,e1->E1->E1);
+                const tym_t tym111 = e1->E1->E1->Ety;
+                elem *tmp = el_alloctmp(tym111);
+                e1->E1->E1 = el_bin(OPeq,tym111,tmp,e1->E1->E1);
                 e->Eoper = OPcomma;
                 e->E2 = el_copytree(tmp);
                 goto L1;
@@ -3177,7 +3179,7 @@ elem * elstruct(elem *e, goal_t goal)
     tym_t tym = ~0;
     tym_t ty = tybasic(t->Tty);
 
-    unsigned sz = type_size(t);
+    unsigned sz = (e->Eoper == OPstrpar && type_zeroSize(t, global_tyf)) ? 0 : type_size(t);
     //printf("\tsz = %d\n", (int)sz);
     if (sz == 16)
     {
@@ -3575,10 +3577,15 @@ STATIC elem * eleq(elem *e, goal_t goal)
             e1->Eoper == OPvar &&
             (e2->Eoper == OPpair || e2->Eoper == OPrpair) &&
             goal == GOALnone &&
-            !el_appears(e2, e1->EV.sp.Vsym)
+            !el_appears(e2, e1->EV.sp.Vsym) &&
+            // Disable this rewrite if we're using x87 and `e1` is a FP-value
+            // but `e2` is not, or vice versa
+            // https://issues.dlang.org/show_bug.cgi?id=18197
+            (config.fpxmmregs ||
+             (tyfloating(e2->E1->Ety) != 0) == (tyfloating(e2->Ety) != 0))
            )
         {
-            //printf("** before:\n"); WReqn(e); printf("\n");
+            // printf("** before:\n"); elem_print(e); printf("\n");
             tym_t ty = (REGSIZE == 8) ? TYllong : TYint;
             if (tyfloating(e1->Ety) && REGSIZE >= 4)
                 ty = (REGSIZE == 8) ? TYdouble : TYfloat;
@@ -3605,7 +3612,7 @@ STATIC elem * eleq(elem *e, goal_t goal)
             }
 
             e2->Eoper = OPcomma;
-            //printf("** after:\n"); WReqn(e2); printf("\n");
+            // printf("** after:\n"); elem_print(e2); printf("\n");
             return optelem(e2,goal);
         }
 
@@ -4968,7 +4975,7 @@ STATIC elem * elvalist(elem *e, goal_t goal)
 
 #endif
 
-#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
+#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_DRAGONFLYBSD || TARGET_SOLARIS
 
     assert(I64); // va_start is not an intrinsic on 32-bit
     // (OPva_start &va)
@@ -5197,6 +5204,33 @@ beg:
                 }
                 leftgoal = rightgoal;
                 break;
+
+            case OPcall:
+            case OPcallns:
+            {
+                tym_t tyf = tybasic(e->E1->Ety);
+                leftgoal = rightgoal;
+                elem *e1 = e->E1 = optelem(e->E1, leftgoal);
+
+                // Need argument to type_zeroSize()
+                tym_t tyf_save = global_tyf;
+                global_tyf = tyf;
+                elem *e2 = e->E2 = optelem(e->E2, rightgoal);
+                global_tyf = tyf_save;
+
+                if (!e1)
+                {   if (!e2)
+                        goto retnull;
+                    return el_selecte2(e);
+                }
+                if (!e2)
+                {
+                    if (!leftgoal)
+                        e->Ety = e1->Ety;
+                    return el_selecte1(e);
+                }
+                return (*elxxx[op])(e, goal);
+            }
         }
 
         elem *e1 = e->E1;
@@ -5229,6 +5263,7 @@ beg:
                 e->Ety = e1->Ety;
             return el_selecte1(e);
         }
+
         if (op == OPparam && !goal)
             e->Eoper = OPcomma; // DMD bug 6733
 

@@ -114,7 +114,7 @@ extern (C++) abstract class AggregateDeclaration : ScopeDsymbol
         sc2.stc &= STC.safe | STC.trusted | STC.system;
         sc2.parent = this;
         if (isUnionDeclaration())
-            sc2.inunion = 1;
+            sc2.inunion = true;
         sc2.protection = Prot(Prot.Kind.public_);
         sc2.explicitProtection = 0;
         sc2.aligndecl = null;
@@ -128,7 +128,7 @@ extern (C++) abstract class AggregateDeclaration : ScopeDsymbol
         // semanticRun prevents unnecessary setting of _scope during deferred
         // setScope phases for aggregates which already finished semantic().
         // See https://issues.dlang.org/show_bug.cgi?id=16607
-        if (semanticRun < PASSsemanticdone)
+        if (semanticRun < PASS.semanticdone)
             ScopeDsymbol.setScope(sc);
     }
 
@@ -162,7 +162,7 @@ extern (C++) abstract class AggregateDeclaration : ScopeDsymbol
 
             auto ad = cast(AggregateDeclaration)param;
 
-            if (v.semanticRun < PASSsemanticdone)
+            if (v.semanticRun < PASS.semanticdone)
                 v.dsymbolSemantic(null);
             // Return in case a recursive determineFields triggered by v.semantic already finished
             if (ad.sizeok != Sizeok.none)
@@ -173,7 +173,7 @@ extern (C++) abstract class AggregateDeclaration : ScopeDsymbol
 
             if (v.storage_class & (STC.static_ | STC.extern_ | STC.tls | STC.gshared | STC.manifest | STC.ctfe | STC.templateparameter))
                 return 0;
-            if (!v.isField() || v.semanticRun < PASSsemanticdone)
+            if (!v.isField() || v.semanticRun < PASS.semanticdone)
                 return 1;   // unresolvable forward reference
 
             ad.fields.push(v);
@@ -274,7 +274,7 @@ extern (C++) abstract class AggregateDeclaration : ScopeDsymbol
 
     abstract void finalizeSize();
 
-    override final d_uns64 size(Loc loc)
+    override final d_uns64 size(const ref Loc loc)
     {
         //printf("+AggregateDeclaration::size() %s, scope = %p, sizeok = %d\n", toChars(), _scope, sizeok);
         bool ok = determineSize(loc);
@@ -501,7 +501,7 @@ extern (C++) abstract class AggregateDeclaration : ScopeDsymbol
         }
         foreach (e; *elements)
         {
-            if (e && e.op == TOKerror)
+            if (e && e.op == TOK.error)
                 return false;
         }
 
@@ -663,7 +663,7 @@ extern (C++) abstract class AggregateDeclaration : ScopeDsymbol
             vthis.parent = this;
             vthis.protection = Prot(Prot.Kind.public_);
             vthis.alignment = t.alignment();
-            vthis.semanticRun = PASSsemanticdone;
+            vthis.semanticRun = PASS.semanticdone;
 
             if (sizeok == Sizeok.fwd)
                 fields.push(vthis);
@@ -680,14 +680,14 @@ extern (C++) abstract class AggregateDeclaration : ScopeDsymbol
      */
     final Dsymbol searchCtor()
     {
-        auto s = search(Loc(), Id.ctor);
+        auto s = search(Loc.initial, Id.ctor);
         if (s)
         {
             if (!(s.isCtorDeclaration() ||
                   s.isTemplateDeclaration() ||
                   s.isOverloadSet()))
             {
-                s.error("is not a constructor; identifiers starting with __ are reserved for the implementation");
+                s.error("is not a constructor; identifiers starting with `__` are reserved for the implementation");
                 errors = true;
                 s = null;
             }
@@ -702,7 +702,7 @@ extern (C++) abstract class AggregateDeclaration : ScopeDsymbol
                 extern (C++) static int fp(Dsymbol s, void* ctxt)
                 {
                     auto f = s.isCtorDeclaration();
-                    if (f && f.semanticRun == PASSinit)
+                    if (f && f.semanticRun == PASS.init)
                         f.dsymbolSemantic(null);
                     return 0;
                 }

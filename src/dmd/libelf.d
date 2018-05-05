@@ -86,13 +86,12 @@ final class LibElf : Library
         {
             assert(module_name[0]);
             File* file = File.create(cast(char*)module_name);
-            readFile(Loc(), file);
+            readFile(Loc.initial, file);
             buf = file.buffer;
             buflen = file.len;
             file._ref = 1;
             fromfile = 1;
         }
-        int reason = 0;
         if (buflen < 16)
         {
             static if (LOG)

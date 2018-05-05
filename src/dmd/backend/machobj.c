@@ -22,7 +22,7 @@
 #include        <malloc.h>
 #endif
 
-#if __linux__ || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
+#if __linux__ || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __DragonFly__ || __sun
 #include        <signal.h>
 #include        <unistd.h>
 #endif
@@ -1349,6 +1349,8 @@ void Obj::term(const char *objfilename)
         struct nlist_64 sym;
         sym.n_un.n_strx = elf_addmangled(s);
         sym.n_type = N_EXT | N_SECT;
+        if (s->Sflags & SFLhidden)
+            sym.n_type |= N_PEXT; // private extern
         sym.n_desc = 0;
         if (s->Sclass == SCcomdat)
             sym.n_desc = N_WEAK_DEF;
@@ -2092,7 +2094,7 @@ char *obj_mangle2(Symbol *s,char *dest)
                 *p = toupper(*p);
             break;
         case mTYman_std:
-#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
+#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_DRAGONFLYBSD || TARGET_SOLARIS
             if (tyfunc(s->ty()) && !variadic(s->Stype))
 #else
             if (!(config.flags4 & CFG4oldstdmangle) &&
@@ -2111,8 +2113,6 @@ char *obj_mangle2(Symbol *s,char *dest)
                 memcpy(dest + 1 + len, pstr, pstrlen + 1);
                 break;
             }
-        case mTYman_cpp:
-        case mTYman_d:
         case mTYman_sys:
         case 0:
             if (len >= DEST_LEN)
@@ -2121,6 +2121,8 @@ char *obj_mangle2(Symbol *s,char *dest)
             break;
 
         case mTYman_c:
+        case mTYman_cpp:
+        case mTYman_d:
             if (len >= DEST_LEN - 1)
                 dest = (char *)mem_malloc(1 + len + 1);
             dest[0] = '_';
@@ -2264,6 +2266,13 @@ void Obj::pubdef(int seg, Symbol *s, targ_size_t offset)
         case SCcomdef:
             public_symbuf->write(&s, sizeof(s));
             break;
+        case SCstatic:
+            if (s->Sflags & SFLhidden)
+            {
+                public_symbuf->write(&s, sizeof(s));
+                break;
+            }
+            // fallthrough
         default:
             local_symbuf->write(&s, sizeof(s));
             break;
@@ -2328,6 +2337,8 @@ int Obj::common_block(Symbol *s,targ_size_t size,targ_size_t count)
 
     // can't have code or thread local comdef's
     assert(!(s->ty() & (mTYcs | mTYthread)));
+    // support for hidden comdefs not implemented
+    assert(!(s->Sflags & SFLhidden));
 
     struct Comdef comdef;
     comdef.sym = s;

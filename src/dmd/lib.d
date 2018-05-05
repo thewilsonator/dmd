@@ -23,16 +23,16 @@ import dmd.root.outbuffer;
 import dmd.root.file;
 import dmd.root.filename;
 
-static if (TARGET_WINDOS)
+static if (TARGET.Windows)
 {
     import dmd.libomf;
     import dmd.libmscoff;
 }
-else static if (TARGET_LINUX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS)
+else static if (TARGET.Linux || TARGET.FreeBSD || TARGET.OpenBSD || TARGET.Solaris || TARGET.DragonFlyBSD)
 {
     import dmd.libelf;
 }
-else static if (TARGET_OSX)
+else static if (TARGET.OSX)
 {
     import dmd.libmach;
 }
@@ -47,15 +47,15 @@ class Library
 {
     static Library factory()
     {
-        static if (TARGET_WINDOS)
+        static if (TARGET.Windows)
         {
             return (global.params.mscoff || global.params.is64bit) ? LibMSCoff_factory() : LibOMF_factory();
         }
-        else static if (TARGET_LINUX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS)
+        else static if (TARGET.Linux || TARGET.FreeBSD || TARGET.OpenBSD || TARGET.Solaris || TARGET.DragonFlyBSD)
         {
             return LibElf_factory();
         }
-        else static if (TARGET_OSX)
+        else static if (TARGET.OSX)
         {
             return LibMach_factory();
         }
@@ -103,7 +103,7 @@ class Library
     final void write()
     {
         if (global.params.verbose)
-            fprintf(global.stdmsg, "library   %s\n", loc.filename);
+            message("library   %s", loc.filename);
 
         OutBuffer libbuf;
         WriteLibToBuffer(&libbuf);
@@ -112,8 +112,8 @@ class Library
         File* libfile = File.create(loc.filename);
         libfile.setbuffer(libbuf.data, libbuf.offset);
         libbuf.extractData();
-        ensurePathToNameExists(Loc(), libfile.name.toChars());
-        writeFile(Loc(), libfile);
+        ensurePathToNameExists(Loc.initial, libfile.name.toChars());
+        writeFile(Loc.initial, libfile);
     }
 
     final void error(const(char)* format, ...)

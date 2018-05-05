@@ -41,7 +41,8 @@ import dmd.tokens;
 
 bool checkUnsafeAccess(Scope* sc, Expression e, bool readonly, bool printmsg)
 {
-    if (e.op != TOKdotvar)
+    //printf("checkUnsafeAccess(e: '%s', readonly: %d, printmsg: %d)\n", e.toChars(), readonly, printmsg);
+    if (e.op != TOK.dotVariable)
         return false;
     DotVarExp dve = cast(DotVarExp)e;
     if (VarDeclaration v = dve.var.isVarDeclaration())
@@ -53,18 +54,25 @@ bool checkUnsafeAccess(Scope* sc, Expression e, bool readonly, bool printmsg)
         if (!ad)
             return false;
 
-        if (v.overlapped && v.type.hasPointers() && sc.func.setUnsafe())
+        const hasPointers = v.type.hasPointers();
+        if (hasPointers)
         {
-            if (printmsg)
-                e.error("field `%s.%s` cannot access pointers in `@safe` code that overlap other fields",
-                    ad.toChars(), v.toChars());
-            return true;
+            if (ad.sizeok != Sizeok.done)
+                ad.determineSize(ad.loc);       // needed to set v.overlapped
+
+            if (v.overlapped && sc.func.setUnsafe())
+            {
+                if (printmsg)
+                    e.error("field `%s.%s` cannot access pointers in `@safe` code that overlap other fields",
+                        ad.toChars(), v.toChars());
+                return true;
+            }
         }
 
         if (readonly || !e.type.isMutable())
             return false;
 
-        if (v.type.hasPointers() && v.type.toBasetype().ty != Tstruct)
+        if (hasPointers && v.type.toBasetype().ty != Tstruct)
         {
             if ((ad.type.alignment() < Target.ptrsize ||
                  (v.offset & (Target.ptrsize - 1))) &&
@@ -110,9 +118,9 @@ bool isSafeCast(Expression e, Type tfrom, Type tto)
     auto tfromb = tfrom.toBasetype();
     auto ttob = tto.toBasetype();
 
-    if (ttob.ty == Tclass && tfrom.ty == Tclass)
+    if (ttob.ty == Tclass && tfromb.ty == Tclass)
     {
-        ClassDeclaration cdfrom = tfrom.isClassHandle();
+        ClassDeclaration cdfrom = tfromb.isClassHandle();
         ClassDeclaration cdto = ttob.isClassHandle();
 
         int offset;
@@ -122,19 +130,19 @@ bool isSafeCast(Expression e, Type tfrom, Type tto)
         if (cdfrom.isCPPinterface() || cdto.isCPPinterface())
             return false;
 
-        if (!MODimplicitConv(tfrom.mod, ttob.mod))
+        if (!MODimplicitConv(tfromb.mod, ttob.mod))
             return false;
         return true;
     }
 
-    if (ttob.ty == Tarray && tfrom.ty == Tsarray) // https://issues.dlang.org/show_bug.cgi?id=12502
-        tfrom = tfrom.nextOf().arrayOf();
+    if (ttob.ty == Tarray && tfromb.ty == Tsarray) // https://issues.dlang.org/show_bug.cgi?id=12502
+        tfromb = tfromb.nextOf().arrayOf();
 
-    if (ttob.ty == Tarray   && tfrom.ty == Tarray ||
-        ttob.ty == Tpointer && tfrom.ty == Tpointer)
+    if (ttob.ty == Tarray   && tfromb.ty == Tarray ||
+        ttob.ty == Tpointer && tfromb.ty == Tpointer)
     {
         Type ttobn = ttob.nextOf().toBasetype();
-        Type tfromn = tfrom.nextOf().toBasetype();
+        Type tfromn = tfromb.nextOf().toBasetype();
 
         /* From void[] to anything mutable is unsafe because:
          *  int*[] api;
@@ -145,7 +153,7 @@ bool isSafeCast(Expression e, Type tfrom, Type tto)
          */
         if (tfromn.ty == Tvoid && ttobn.isMutable())
         {
-            if (ttob.ty == Tarray && e.op == TOKarrayliteral)
+            if (ttob.ty == Tarray && e.op == TOK.arrayLiteral)
                 return true;
             return false;
         }

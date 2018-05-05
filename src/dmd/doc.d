@@ -388,7 +388,7 @@ extern (C++) void gendocfile(Module m)
     }
     DocComment.parseMacros(&m.escapetable, &m.macrotable, mbuf.peekSlice().ptr, mbuf.peekSlice().length);
     Scope* sc = Scope.createGlobal(m); // create root scope
-    DocComment* dc = DocComment.parse(sc, m, m.comment);
+    DocComment* dc = DocComment.parse(m, m.comment);
     dc.pmacrotable = &m.macrotable;
     dc.pescapetable = &m.escapetable;
     sc.lastdc = dc;
@@ -480,7 +480,7 @@ extern (C++) void gendocfile(Module m)
         assert(m.docfile);
         m.docfile.setbuffer(cast(void*)buf.peekSlice().ptr, buf.peekSlice().length);
         m.docfile._ref = 1;
-        ensurePathToNameExists(Loc(), m.docfile.toChars());
+        ensurePathToNameExists(Loc.initial, m.docfile.toChars());
         writeFile(m.loc, m.docfile);
     }
     else
@@ -505,7 +505,7 @@ extern (C++) void gendocfile(Module m)
         // Transfer image to file
         m.docfile.setbuffer(buf2.data, buf2.offset);
         m.docfile._ref = 1;
-        ensurePathToNameExists(Loc(), m.docfile.toChars());
+        ensurePathToNameExists(Loc.initial, m.docfile.toChars());
         writeFile(m.loc, m.docfile);
     }
 }
@@ -877,7 +877,6 @@ private void emitComment(Dsymbol s, OutBuffer* buf, Scope* sc)
                     "documentation comment");
 
                 auto symbol = dc.a[0];
-                auto symbolName = symbol.ident.toString;
 
                 buf.writestring("$(DDOC_MEMBER");
                 buf.writestring("$(DDOC_MEMBER_HEADER");
@@ -922,7 +921,7 @@ private void emitComment(Dsymbol s, OutBuffer* buf, Scope* sc)
             }
             if (s)
             {
-                DocComment* dc = DocComment.parse(sc, s, com);
+                DocComment* dc = DocComment.parse(s, com);
                 dc.pmacrotable = &sc._module.macrotable;
                 sc.lastdc = dc;
             }
@@ -1408,7 +1407,7 @@ struct DocComment
     Escape** pescapetable;
     Dsymbols a;
 
-    extern (C++) static DocComment* parse(Scope* sc, Dsymbol s, const(char)* comment)
+    extern (C++) static DocComment* parse(Dsymbol s, const(char)* comment)
     {
         //printf("parse(%s): '%s'\n", s.toChars(), comment);
         auto dc = new DocComment();
@@ -2459,9 +2458,9 @@ extern (C++) void highlightText(Scope* sc, Dsymbols* a, OutBuffer* buf, size_t o
                             i = k - 1;
                         else
                         {
-                            /* Replace URL with '$(LINK URL)'
+                            /* Replace URL with '$(DDOC_LINK_AUTODETECT URL)'
                              */
-                            i = buf.bracket(i, "$(LINK ", k, ")") - 1;
+                            i = buf.bracket(i, "$(DDOC_LINK_AUTODETECT ", k, ")") - 1;
                         }
                         break;
                     }
@@ -2473,23 +2472,23 @@ extern (C++) void highlightText(Scope* sc, Dsymbols* a, OutBuffer* buf, size_t o
                 if (c == '_' && (i == 0 || !isdigit(*(start - 1))) && (i == buf.offset - 1 || !isReservedName(start, len)))
                 {
                     buf.remove(i, 1);
-                    i = j - 1;
+                    i = buf.bracket(i, "$(DDOC_AUTO_PSYMBOL_SUPPRESS ", j - 1, ")") - 1;
                     break;
                 }
                 if (isIdentifier(a, start, len))
                 {
-                    i = buf.bracket(i, "$(DDOC_PSYMBOL ", j, ")") - 1;
+                    i = buf.bracket(i, "$(DDOC_AUTO_PSYMBOL ", j, ")") - 1;
                     break;
                 }
                 if (isKeyword(start, len))
                 {
-                    i = buf.bracket(i, "$(DDOC_KEYWORD ", j, ")") - 1;
+                    i = buf.bracket(i, "$(DDOC_AUTO_KEYWORD ", j, ")") - 1;
                     break;
                 }
                 if (isFunctionParameter(a, start, len))
                 {
                     //printf("highlighting arg '%s', i = %d, j = %d\n", arg.ident.toChars(), i, j);
-                    i = buf.bracket(i, "$(DDOC_PARAM ", j, ")") - 1;
+                    i = buf.bracket(i, "$(DDOC_AUTO_PARAM ", j, ")") - 1;
                     break;
                 }
                 i = j - 1;
@@ -2498,7 +2497,7 @@ extern (C++) void highlightText(Scope* sc, Dsymbols* a, OutBuffer* buf, size_t o
         }
     }
     if (inCode)
-        error(s ? s.loc : Loc(), "unmatched `---` in DDoc comment");
+        error(s ? s.loc : Loc.initial, "unmatched `---` in DDoc comment");
 }
 
 /**************************************************
@@ -2667,7 +2666,7 @@ extern (C++) void highlightCode2(Scope* sc, Dsymbols* a, OutBuffer* buf, size_t 
         const(char)* highlight = null;
         switch (tok.value)
         {
-        case TOKidentifier:
+        case TOK.identifier:
             {
                 if (!sc)
                     break;
@@ -2685,10 +2684,10 @@ extern (C++) void highlightCode2(Scope* sc, Dsymbols* a, OutBuffer* buf, size_t 
                 }
                 break;
             }
-        case TOKcomment:
+        case TOK.comment:
             highlight = "$(D_COMMENT ";
             break;
-        case TOKstring:
+        case TOK.string_:
             highlight = "$(D_STRING ";
             break;
         default:
@@ -2701,7 +2700,7 @@ extern (C++) void highlightCode2(Scope* sc, Dsymbols* a, OutBuffer* buf, size_t 
             res.writestring(highlight);
             size_t o = res.offset;
             highlightCode3(sc, &res, tok.ptr, lex.p);
-            if (tok.value == TOKcomment || tok.value == TOKstring)
+            if (tok.value == TOK.comment || tok.value == TOK.string_)
                 /* https://issues.dlang.org/show_bug.cgi?id=7656
                  * https://issues.dlang.org/show_bug.cgi?id=7715
                  * https://issues.dlang.org/show_bug.cgi?id=10519
@@ -2711,7 +2710,7 @@ extern (C++) void highlightCode2(Scope* sc, Dsymbols* a, OutBuffer* buf, size_t 
         }
         else
             highlightCode3(sc, &res, tok.ptr, lex.p);
-        if (tok.value == TOKeof)
+        if (tok.value == TOK.endOfFile)
             break;
         lastp = lex.p;
     }

@@ -16,6 +16,7 @@ import core.stdc.stdio;
 import core.stdc.string;
 import dmd.aggregate;
 import dmd.attrib;
+import dmd.ctorflow;
 import dmd.dclass;
 import dmd.declaration;
 import dmd.dmodule;
@@ -36,73 +37,14 @@ import dmd.tokens;
 
 //version=LOGSEARCH;
 
-extern (C++) bool mergeFieldInit(Loc loc, ref uint fieldInit, uint fi, bool mustInit)
-{
-    if (fi != fieldInit)
-    {
-        // Have any branches returned?
-        bool aRet = (fi & CSX.return_) != 0;
-        bool bRet = (fieldInit & CSX.return_) != 0;
-        // Have any branches halted?
-        bool aHalt = (fi & CSX.halt) != 0;
-        bool bHalt = (fieldInit & CSX.halt) != 0;
-        bool ok;
-        if (aHalt && bHalt)
-        {
-            ok = true;
-            fieldInit = CSX.halt;
-        }
-        else if (!aHalt && aRet)
-        {
-            ok = !mustInit || (fi & CSX.this_ctor);
-            fieldInit = fieldInit;
-        }
-        else if (!bHalt && bRet)
-        {
-            ok = !mustInit || (fieldInit & CSX.this_ctor);
-            fieldInit = fi;
-        }
-        else if (aHalt)
-        {
-            ok = !mustInit || (fieldInit & CSX.this_ctor);
-            fieldInit = fieldInit;
-        }
-        else if (bHalt)
-        {
-            ok = !mustInit || (fi & CSX.this_ctor);
-            fieldInit = fi;
-        }
-        else
-        {
-            ok = !mustInit || !((fieldInit ^ fi) & CSX.this_ctor);
-            fieldInit |= fi;
-        }
-        return ok;
-    }
-    return true;
-}
-
-enum CSX
-{
-    this_ctor       = 0x01,     /// called this()
-    super_ctor      = 0x02,     /// called super()
-    this_           = 0x04,     /// referenced this
-    super_          = 0x08,     /// referenced super
-    label           = 0x10,     /// seen a label
-    return_         = 0x20,     /// seen a return statement
-    any_ctor        = 0x40,     /// either this() or super() was called
-    halt            = 0x80,     /// assert(0)
-}
 
 // Flags that would not be inherited beyond scope nesting
 enum SCOPE
 {
     ctor          = 0x0001,   /// constructor type
+    noaccesscheck = 0x0002,   /// don't do access checks
     condition     = 0x0004,   /// inside static if/assert condition
     debug_        = 0x0008,   /// inside debug conditional
-
-    // Flags that would be inherited beyond scope nesting
-    noaccesscheck = 0x0002,   /// don't do access checks
     constraint    = 0x0010,   /// inside template constraint
     invariant_    = 0x0020,   /// inside invariant code
     require       = 0x0040,   /// inside in contract code
@@ -112,10 +54,15 @@ enum SCOPE
     compile       = 0x0100,   /// inside __traits(compile)
     ignoresymbolvisibility    = 0x0200,   /// ignore symbol visibility
                                           /// https://issues.dlang.org/show_bug.cgi?id=15907
+    onlysafeaccess = 0x0400,  /// unsafe access is not allowed for @safe code
     free          = 0x8000,   /// is on free list
 
     fullinst      = 0x10000,  /// fully instantiate templates
 }
+
+// Flags that are carried along with a scope push()
+enum SCOPEpush = SCOPE.contract | SCOPE.debug_ | SCOPE.ctfe | SCOPE.compile | SCOPE.constraint |
+                 SCOPE.noaccesscheck | SCOPE.onlysafeaccess | SCOPE.ignoresymbolvisibility;
 
 struct Scope
 {
@@ -133,9 +80,9 @@ struct Scope
     Statement scontinue;            /// enclosing statement that supports "continue"
     ForeachStatement fes;           /// if nested function for ForeachStatement, this is it
     Scope* callsc;                  /// used for __FUNCTION__, __PRETTY_FUNCTION__ and __MODULE__
-    int inunion;                    /// we're processing members of a union
-    int nofree;                     /// set if shouldn't free it
-    int noctor;                     /// set if constructor calls aren't allowed
+    bool inunion;                   /// true if processing members of a union
+    bool nofree;                    /// true if shouldn't free it
+    bool inLoop;                    /// true if inside a loop (where constructor calls aren't allowed)
     int intypeof;                   /// in typeof(exp)
     VarDeclaration lastVar;         /// Previous symbol used to prevent goto-skips-init
 
@@ -147,24 +94,19 @@ struct Scope
     Module minst;                   /// root module where the instantiated templates should belong to
     TemplateInstance tinst;         /// enclosing template instance
 
-    // primitive flow analysis for constructors
-    uint callSuper;
-
-    // primitive flow analysis for field initializations
-    uint* fieldinit;
-    size_t fieldinit_dim;
+    CtorFlow ctorflow;              /// flow analysis for constructors
 
     /// alignment for struct members
     AlignDeclaration aligndecl;
 
     /// linkage for external functions
-    LINK linkage = LINKd;
+    LINK linkage = LINK.d;
 
     /// mangle type
     CPPMANGLE cppmangle = CPPMANGLE.def;
 
     /// inlining strategy for functions
-    PINLINE inlining = PINLINEdefault;
+    PINLINE inlining = PINLINE.default_;
 
     /// protection for class members
     Prot protection = Prot(Prot.Kind.public_);
@@ -226,7 +168,7 @@ struct Scope
         /* https://issues.dlang.org/show_bug.cgi?id=11777
          * The copied scope should not inherit fieldinit.
          */
-        sc.fieldinit = null;
+        sc.ctorflow.fieldinit = null;
         return sc;
     }
 
@@ -248,10 +190,9 @@ struct Scope
             assert(s != enclosing);
         }
         s.slabel = null;
-        s.nofree = 0;
-        s.fieldinit = saveFieldInit();
-        s.flags = (flags & (SCOPE.contract | SCOPE.debug_ | SCOPE.ctfe | SCOPE.compile | SCOPE.constraint |
-                            SCOPE.noaccesscheck | SCOPE.ignoresymbolvisibility));
+        s.nofree = false;
+        s.ctorflow.fieldinit = ctorflow.saveFieldInit();
+        s.flags = (flags & SCOPEpush);
         s.lastdc = null;
         assert(&this != s);
         return s;
@@ -268,21 +209,11 @@ struct Scope
     extern (C++) Scope* pop()
     {
         //printf("Scope::pop() %p nofree = %d\n", this, nofree);
-        Scope* enc = enclosing;
         if (enclosing)
-        {
-            enclosing.callSuper |= callSuper;
-            if (fieldinit)
-            {
-                if (enclosing.fieldinit)
-                {
-                    assert(fieldinit != enclosing.fieldinit);
-                    foreach (i; 0 .. fieldinit_dim)
-                        enclosing.fieldinit[i] |= fieldinit[i];
-                }
-                freeFieldinit();
-            }
-        }
+            enclosing.ctorflow.OR(ctorflow);
+        ctorflow.freeFieldinit();
+
+        Scope* enc = enclosing;
         if (!nofree)
         {
             enclosing = freelist;
@@ -292,18 +223,15 @@ struct Scope
         return enc;
     }
 
-    void allocFieldinit(size_t dim)
+    /*************************
+     * Similar to pop(), but the results in `this` are not folded
+     * into `enclosing`.
+     */
+    extern (D) void detach()
     {
-        fieldinit = cast(typeof(fieldinit))mem.xcalloc(typeof(*fieldinit).sizeof, dim);
-        fieldinit_dim = dim;
-    }
-
-    void freeFieldinit()
-    {
-        if (fieldinit)
-            mem.xfree(fieldinit);
-        fieldinit = null;
-        fieldinit_dim = 0;
+        ctorflow.freeFieldinit();
+        enclosing = null;
+        pop();
     }
 
     extern (C++) Scope* startCTFE()
@@ -339,92 +267,32 @@ struct Scope
         return pop();
     }
 
-    extern (C++) void mergeCallSuper(Loc loc, uint cs)
-    {
-        // This does a primitive flow analysis to support the restrictions
-        // regarding when and how constructors can appear.
-        // It merges the results of two paths.
-        // The two paths are callSuper and cs; the result is merged into callSuper.
-        if (cs != callSuper)
-        {
-            // Have ALL branches called a constructor?
-            int aAll = (cs & (CSX.this_ctor | CSX.super_ctor)) != 0;
-            int bAll = (callSuper & (CSX.this_ctor | CSX.super_ctor)) != 0;
-            // Have ANY branches called a constructor?
-            bool aAny = (cs & CSX.any_ctor) != 0;
-            bool bAny = (callSuper & CSX.any_ctor) != 0;
-            // Have any branches returned?
-            bool aRet = (cs & CSX.return_) != 0;
-            bool bRet = (callSuper & CSX.return_) != 0;
-            // Have any branches halted?
-            bool aHalt = (cs & CSX.halt) != 0;
-            bool bHalt = (callSuper & CSX.halt) != 0;
-            bool ok = true;
-            if (aHalt && bHalt)
-            {
-                callSuper = CSX.halt;
-            }
-            else if ((!aHalt && aRet && !aAny && bAny) || (!bHalt && bRet && !bAny && aAny))
-            {
-                // If one has returned without a constructor call, there must be never
-                // have been ctor calls in the other.
-                ok = false;
-            }
-            else if (aHalt || aRet && aAll)
-            {
-                // If one branch has called a ctor and then exited, anything the
-                // other branch has done is OK (except returning without a
-                // ctor call, but we already checked that).
-                callSuper |= cs & (CSX.any_ctor | CSX.label);
-            }
-            else if (bHalt || bRet && bAll)
-            {
-                callSuper = cs | (callSuper & (CSX.any_ctor | CSX.label));
-            }
-            else
-            {
-                // Both branches must have called ctors, or both not.
-                ok = (aAll == bAll);
-                // If one returned without a ctor, we must remember that
-                // (Don't bother if we've already found an error)
-                if (ok && aRet && !aAny)
-                    callSuper |= CSX.return_;
-                callSuper |= cs & (CSX.any_ctor | CSX.label);
-            }
-            if (!ok)
-                error(loc, "one path skips constructor");
-        }
-    }
 
-    extern (C++) uint* saveFieldInit()
+    /*******************************
+     * Merge results of `ctorflow` into `this`.
+     * Params:
+     *   loc = for error messages
+     *   ctorflow = flow results to merge in
+     */
+    extern (D) void merge(const ref Loc loc, const ref CtorFlow ctorflow)
     {
-        uint* fi = null;
-        if (fieldinit) // copy
-        {
-            size_t dim = fieldinit_dim;
-            fi = cast(uint*)mem.xmalloc(uint.sizeof * dim);
-            for (size_t i = 0; i < dim; i++)
-                fi[i] = fieldinit[i];
-        }
-        return fi;
-    }
+        if (!mergeCallSuper(this.ctorflow.callSuper, ctorflow.callSuper))
+            error(loc, "one path skips constructor");
 
-    extern (C++) void mergeFieldInit(Loc loc, uint* fies)
-    {
-        if (fieldinit && fies)
+        const fies = ctorflow.fieldinit;
+        if (this.ctorflow.fieldinit.length && fies.length)
         {
             FuncDeclaration f = func;
             if (fes)
                 f = fes.func;
             auto ad = f.isMember2();
             assert(ad);
-            for (size_t i = 0; i < ad.fields.dim; i++)
+            foreach (i, v; ad.fields)
             {
-                VarDeclaration v = ad.fields[i];
                 bool mustInit = (v.storage_class & STC.nodefaultctor || v.type.needsNested());
-                if (!.mergeFieldInit(loc, fieldinit[i], fies[i], mustInit))
+                if (!mergeFieldInit(this.ctorflow.fieldinit[i], fies[i]) && mustInit)
                 {
-                    .error(loc, "one path skips field `%s`", ad.fields[i].toChars());
+                    error(loc, "one path skips field `%s`", v.toChars());
                 }
             }
         }
@@ -449,7 +317,7 @@ struct Scope
      * Returns:
      *  symbol if found, null if not
      */
-    extern (C++) Dsymbol search(Loc loc, Identifier ident, Dsymbol* pscopesym, int flags = IgnoreNone)
+    extern (C++) Dsymbol search(const ref Loc loc, Identifier ident, Dsymbol* pscopesym, int flags = IgnoreNone)
     {
         version (LOGSEARCH)
         {
@@ -464,7 +332,7 @@ struct Scope
 
             static void printMsg(string txt, Dsymbol s)
             {
-                printf("%.*s  %s.%s, kind = '%s'\n", cast(int)msg.length, msg.ptr,
+                printf("%.*s  %s.%s, kind = '%s'\n", cast(int)txt.length, txt.ptr,
                     s.parent ? s.parent.toChars() : "", s.toChars(), s.kind());
             }
         }
@@ -511,7 +379,7 @@ struct Scope
                         ident == Id.length && sc.scopesym.isArrayScopeSymbol() &&
                         sc.enclosing && sc.enclosing.search(loc, ident, null, flags))
                     {
-                        warning(s.loc, "array 'length' hides other 'length' name in outer scope");
+                        warning(s.loc, "array `length` hides other `length` name in outer scope");
                     }
                     //printMsg("\tfound local", s);
                     if (pscopesym)
@@ -561,7 +429,7 @@ struct Scope
                     s = searchScopes(flags | SearchImportsOnly | IgnoreSymbolVisibility);
 
                 if (s && !(flags & IgnoreErrors))
-                    .deprecation(loc, "%s is not visible from module %s", s.toPrettyChars(), _module.toChars());
+                    .deprecation(loc, "`%s` is not visible from module `%s`", s.toPrettyChars(), _module.toChars());
                 version (LOGSEARCH) if (s) printMsg("-Scope.search() found imported private symbol", s);
             }
         }
@@ -595,16 +463,16 @@ struct Scope
         OutBuffer buf;
         buf.writestring("local import search method found ");
         if (osold)
-            buf.printf("%s %s (%d overloads)", sold.kind(), sold.toPrettyChars(), cast(int) osold.a.dim);
+            buf.printf("%s `%s` (%d overloads)", sold.kind(), sold.toPrettyChars(), cast(int) osold.a.dim);
         else if (sold)
-            buf.printf("%s %s", sold.kind(), sold.toPrettyChars());
+            buf.printf("%s `%s`", sold.kind(), sold.toPrettyChars());
         else
             buf.writestring("nothing");
         buf.writestring(" instead of ");
         if (osnew)
-            buf.printf("%s %s (%d overloads)", snew.kind(), snew.toPrettyChars(), cast(int) osnew.a.dim);
+            buf.printf("%s `%s` (%d overloads)", snew.kind(), snew.toPrettyChars(), cast(int) osnew.a.dim);
         else if (snew)
-            buf.printf("%s %s", snew.kind(), snew.toPrettyChars());
+            buf.printf("%s `%s`", snew.kind(), snew.toPrettyChars());
         else
             buf.writestring("nothing");
 
@@ -635,7 +503,7 @@ struct Scope
             Scope* sc = &this;
             Module.clearCache();
             Dsymbol scopesym = null;
-            Dsymbol s = sc.search(Loc(), id, &scopesym, IgnoreErrors);
+            Dsymbol s = sc.search(Loc.initial, id, &scopesym, IgnoreErrors);
             if (s)
             {
                 for (cost = 0; sc; sc = sc.enclosing, ++cost)
@@ -666,13 +534,15 @@ struct Scope
     {
         TOK tok;
         if (ident == Id.NULL)
-            tok = TOKnull;
+            tok = TOK.null_;
         else if (ident == Id.TRUE)
-            tok = TOKtrue;
+            tok = TOK.true_;
         else if (ident == Id.FALSE)
-            tok = TOKfalse;
+            tok = TOK.false_;
         else if (ident == Id.unsigned)
-            tok = TOKuns32;
+            tok = TOK.uns32;
+        else if (ident == Id.wchar_t)
+            tok = global.params.isWindows ? TOK.wchar_ : TOK.dchar_;
         else
             return null;
         return Token.toChars(tok);
@@ -757,7 +627,7 @@ struct Scope
         for (Scope* sc = &this; sc; sc = sc.enclosing)
         {
             //printf("\tsc = %p\n", sc);
-            sc.nofree = 1;
+            sc.nofree = true;
             assert(!(flags & SCOPE.free));
             //assert(sc != sc.enclosing);
             //assert(!sc.enclosing || sc != sc.enclosing.enclosing);
@@ -793,12 +663,10 @@ struct Scope
         this.depdecl = sc.depdecl;
         this.inunion = sc.inunion;
         this.nofree = sc.nofree;
-        this.noctor = sc.noctor;
+        this.inLoop = sc.inLoop;
         this.intypeof = sc.intypeof;
         this.lastVar = sc.lastVar;
-        this.callSuper = sc.callSuper;
-        this.fieldinit = sc.fieldinit;
-        this.fieldinit_dim = sc.fieldinit_dim;
+        this.ctorflow = sc.ctorflow;
         this.flags = sc.flags;
         this.lastdc = sc.lastdc;
         this.anchorCounts = sc.anchorCounts;

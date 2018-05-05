@@ -49,7 +49,7 @@ extern (C++) abstract class Condition : RootObject
         return DYNCAST.condition;
     }
 
-    final extern (D) this(Loc loc)
+    extern (D) this(const ref Loc loc)
     {
         this.loc = loc;
     }
@@ -101,7 +101,7 @@ extern (C++) final class StaticForeach : RootObject
      */
     bool needExpansion = false;
 
-    final extern (D) this(Loc loc,ForeachStatement aggrfe,ForeachRangeStatement rangefe)
+    extern (D) this(const ref Loc loc,ForeachStatement aggrfe,ForeachRangeStatement rangefe)
     in
     {
         assert(!!aggrfe ^ !!rangefe);
@@ -138,7 +138,7 @@ extern (C++) final class StaticForeach : RootObject
         sc = sc.endCTFE();
         el = el.optimize(WANTvalue);
         el = el.ctfeInterpret();
-        if (el.op == TOKint64)
+        if (el.op == TOK.int64)
         {
             dinteger_t length = el.toInteger();
             auto es = new Expressions();
@@ -167,10 +167,10 @@ extern (C++) final class StaticForeach : RootObject
      * Returns:
      *     AST of the expression `(){ s; }()` with location loc.
      */
-    private extern(D) Expression wrapAndCall(Loc loc, Statement s)
+    private extern(D) Expression wrapAndCall(const ref Loc loc, Statement s)
     {
-        auto tf = new TypeFunction(new Parameters(), null, 0, LINK.def, 0);
-        auto fd = new FuncLiteralDeclaration(loc, loc, tf, TOKreserved, null);
+        auto tf = new TypeFunction(new Parameters(), null, 0, LINK.default_, 0);
+        auto fd = new FuncLiteralDeclaration(loc, loc, tf, TOK.reserved, null);
         fd.fbody = s;
         auto fe = new FuncExp(loc, fd);
         auto ce = new CallExp(loc, fe, new Expressions());
@@ -190,7 +190,7 @@ extern (C++) final class StaticForeach : RootObject
      *     `foreach (parameters; lower .. upper) s;`
      *     Where aggregate/lower, upper are as for the current StaticForeach.
      */
-    private extern(D) Statement createForeach(Loc loc, Parameters* parameters, Statement s)
+    private extern(D) Statement createForeach(const ref Loc loc, Parameters* parameters, Statement s)
     {
         if (aggrfe)
         {
@@ -223,7 +223,7 @@ extern (C++) final class StaticForeach : RootObject
      *         }
      */
 
-    private extern(D) TypeStruct createTupleType(Loc loc, Expressions* e, Scope* sc)
+    private extern(D) TypeStruct createTupleType(const ref Loc loc, Expressions* e, Scope* sc)
     {   // TODO: move to druntime?
         auto sid = Identifier.generateId("Tuple");
         auto sdecl = new StructDeclaration(loc, sid, false);
@@ -248,7 +248,7 @@ extern (C++) final class StaticForeach : RootObject
      *     An AST for the expression `Tuple(e)`.
      */
 
-    private extern(D) Expression createTuple(Loc loc, TypeStruct type, Expressions* e)
+    private extern(D) Expression createTuple(const ref Loc loc, TypeStruct type, Expressions* e)
     {   // TODO: move to druntime?
         return new CallExp(loc, new TypeExp(loc, type), e);
     }
@@ -360,7 +360,7 @@ extern (C++) final class StaticForeach : RootObject
         aggr = aggr.ctfeInterpret();
 
         assert(!!aggrfe ^ !!rangefe);
-        aggrfe = new ForeachStatement(loc, TOKforeach, pparams[2], aggr,
+        aggrfe = new ForeachStatement(loc, TOK.foreach_, pparams[2], aggr,
                                       aggrfe ? aggrfe._body : rangefe._body,
                                       aggrfe ? aggrfe.endloc : rangefe.endloc);
         rangefe = null;
@@ -428,9 +428,9 @@ extern (C++) class DVCondition : Condition
     Identifier ident;
     Module mod;
 
-    final extern (D) this(Module mod, uint level, Identifier ident)
+    extern (D) this(Module mod, uint level, Identifier ident)
     {
-        super(Loc());
+        super(Loc.initial);
         this.mod = mod;
         this.level = level;
         this.ident = ident;
@@ -681,7 +681,7 @@ extern (C++) final class VersionCondition : DVCondition
      *   loc = Where the identifier is set
      *   ident = identifier being checked (ident[$] must be '\0')
      */
-    extern(D) static void checkReserved(Loc loc, const(char)[] ident)
+    extern(D) static void checkReserved(const ref Loc loc, const(char)[] ident)
     {
         if (isReserved(ident))
             error(loc, "version identifier `%s` is reserved and cannot be set",
@@ -714,7 +714,7 @@ extern (C++) final class VersionCondition : DVCondition
     /// Ditto
     extern(D) static void addGlobalIdent(const(char)[] ident)
     {
-        checkReserved(Loc(), ident);
+        checkReserved(Loc.initial, ident);
         addPredefinedGlobalIdent(ident);
     }
 
@@ -818,7 +818,7 @@ extern (C++) final class StaticIfCondition : Condition
     Expression exp;
     int nest;           // limit circular dependencies
 
-    extern (D) this(Loc loc, Expression exp)
+    extern (D) this(const ref Loc loc, Expression exp)
     {
         super(loc);
         this.exp = exp;
@@ -842,7 +842,7 @@ extern (C++) final class StaticIfCondition : Condition
 
         if (inc == 0)
         {
-            if (exp.op == TOKerror || nest > 100)
+            if (exp.op == TOK.error || nest > 100)
             {
                 error(loc, (nest > 1000) ? "unresolvable circular `static if` expression" : "error evaluating `static if` expression");
                 return errorReturn();

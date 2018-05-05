@@ -20,6 +20,7 @@
 class ClassDeclaration;
 class Dsymbol;
 class Expression;
+class Parameter;
 class Type;
 class TypeTuple;
 class Module;
@@ -27,18 +28,23 @@ struct OutBuffer;
 
 struct Target
 {
-    static int ptrsize;
-    static int realsize;             // size a real consumes in memory
-    static int realpad;              // 'padding' added to the CPU real size to bring it up to realsize
-    static int realalignsize;        // alignment for reals
-    static bool reverseCppOverloads; // with dmc and cl, overloaded functions are grouped and in reverse order
-    static bool cppExceptions;       // set if catching C++ exceptions is supported
-    static char int64Mangle;         // mangling character for C++ int64_t
-    static char uint64Mangle;        // mangling character for C++ uint64_t
-    static int c_longsize;           // size of a C 'long' or 'unsigned long' type
-    static int c_long_doublesize;    // size of a C 'long double'
-    static int classinfosize;        // size of 'ClassInfo'
+    // D ABI
+    static unsigned ptrsize;
+    static unsigned realsize;           // size a real consumes in memory
+    static unsigned realpad;            // 'padding' added to the CPU real size to bring it up to realsize
+    static unsigned realalignsize;      // alignment for reals
+    static unsigned classinfosize;      // size of 'ClassInfo'
     static unsigned long long maxStaticDataSize;  // maximum size of static data
+
+    // C ABI
+    static unsigned c_longsize;         // size of a C 'long' or 'unsigned long' type
+    static unsigned c_long_doublesize;  // size of a C 'long double'
+
+    // C++ ABI
+    static bool reverseCppOverloads;    // with dmc and cl, overloaded functions are grouped and in reverse order
+    static bool cppExceptions;          // set if catching C++ exceptions is supported
+    static char int64Mangle;            // mangling character for C++ int64_t
+    static char uint64Mangle;           // mangling character for C++ uint64_t
 
     template <typename T>
     struct FPTypeProperties
@@ -74,12 +80,13 @@ struct Target
     static Expression *paintAsType(Expression *e, Type *type);
     // ABI and backend.
     static void loadModule(Module *m);
-    static void prefixName(OutBuffer *buf, LINK linkage);
     static const char *toCppMangle(Dsymbol *s);
     static const char *cppTypeInfoMangle(ClassDeclaration *cd);
     static const char *cppTypeMangle(Type *t);
+    static Type *cppParameterType(Parameter *p);
     static LINK systemLinkage();
     static TypeTuple *toArgTypes(Type *t);
+    static d_uns64 parameterSize(const Loc& loc, Type *t);
 };
 
 #endif

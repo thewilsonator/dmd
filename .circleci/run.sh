@@ -2,16 +2,31 @@
 
 set -uexo pipefail
 
-HOST_DMD_VER=2.072.2 # same as in dmd/src/posix.mak
+HOST_DMD_VER=2.074.1 # same as in dmd/src/posix.mak
 CURL_USER_AGENT="CirleCI $(curl --version | head -n 1)"
-N=2
+N=4
 CIRCLE_NODE_INDEX=${CIRCLE_NODE_INDEX:-0}
+CIRCLE_STAGE=${CIRCLE_STAGE:-pic}
 CIRCLE_PROJECT_REPONAME=${CIRCLE_PROJECT_REPONAME:-dmd}
 BUILD="debug"
+DMD=dmd
+PIC=1
 
-case $CIRCLE_NODE_INDEX in
-    0) MODEL=64 ;;
-    1) MODEL=32 ;;
+case "${CIRCLE_STAGE}" in
+    # Defined by old, existing PRs
+    # Added to avoid needing to rebase them
+    build)
+        ;&
+    pic)
+        MODEL=64
+        PIC=1
+        ;;
+    no_pic)
+        PIC=0
+        case $CIRCLE_NODE_INDEX in
+            0) MODEL=64 ;;
+            1) MODEL=32 ;;
+        esac
 esac
 
 # clone druntime and phobos
@@ -49,9 +64,11 @@ download() {
 }
 
 install_deps() {
+    sudo apt-get update --quiet=2
     if [ $MODEL -eq 32 ]; then
-        sudo apt-get update --quiet=2
-        sudo aptitude install g++-multilib --assume-yes --quiet=2
+        sudo apt-get install g++-multilib gdb --assume-yes --quiet=2
+    else
+        sudo apt-get install gdb --assume-yes --quiet=2
     fi
 
     download "https://dlang.org/install.sh" "https://nightlies.dlang.org/install.sh" "install.sh"
@@ -93,12 +110,23 @@ setup_repos() {
 coverage()
 {
     # load environment for bootstrap compiler
-    source "$(CURL_USER_AGENT=\"$CURL_USER_AGENT\" bash ~/dlang/install.sh dmd-$HOST_DMD_VER --activate)"
+    if [ -f ~/dlang/install.sh ] ; then
+        source "$(CURL_USER_AGENT=\"$CURL_USER_AGENT\" bash ~/dlang/install.sh dmd-$HOST_DMD_VER --activate)"
+    fi
 
     # build dmd, druntime, and phobos
-    make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=$DMD BUILD=$BUILD ENABLE_WARNINGS=1 all
-    make -j$N -C ../druntime -f posix.mak MODEL=$MODEL
-    make -j$N -C ../phobos -f posix.mak MODEL=$MODEL
+    make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=$DMD BUILD=$BUILD ENABLE_WARNINGS=1 PIC="$PIC" all
+    make -j$N -C ../druntime -f posix.mak MODEL=$MODEL PIC="$PIC"
+    make -j$N -C ../phobos -f posix.mak MODEL=$MODEL PIC="$PIC"
+
+    # FIXME
+    # Building d_do_test currently uses the host library for linking
+    # Remove me after https://github.com/dlang/dmd/pull/7846 has been merged (-conf=)
+    if [ -f ~/dlang/install.sh ] ; then
+        deactivate
+    else
+        sudo rm -rf /dlang
+    fi
 
     # FIXME
     # Temporarily the failing long file name test has been removed
@@ -113,12 +141,12 @@ coverage()
     mkdir -p _${build_path}
     cp $build_path/dmd _${build_path}/host_dmd
     cp $build_path/dmd.conf _${build_path}
-    make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=../_${build_path}/host_dmd clean
-    make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=../_${build_path}/host_dmd ENABLE_COVERAGE=1 ENABLE_WARNINGS=1
+    make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=../_${build_path}/host_dmd PIC="$PIC" clean
+    make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=../_${build_path}/host_dmd ENABLE_COVERAGE=1 ENABLE_WARNINGS=1 PIC="$PIC"
 
     cp $build_path/dmd _${build_path}/host_dmd_cov
-    make -j1 -C src -f posix.mak MODEL=$MODEL HOST_DMD=../_${build_path}/host_dmd_cov ENABLE_COVERAGE=1 unittest
-    make -j1 -C test MODEL=$MODEL ARGS="-O -inline -release" DMD_TEST_COVERAGE=1
+    make -j1 -C src -f posix.mak MODEL=$MODEL HOST_DMD=../_${build_path}/host_dmd_cov ENABLE_COVERAGE=1 PIC="$PIC" unittest
+    make -j1 -C test MODEL=$MODEL ARGS="-O -inline -release" DMD_TEST_COVERAGE=1 PIC="$PIC"
 }
 
 # Checks that all files have been committed and no temporary, untracked files exist.
@@ -130,8 +158,17 @@ check_clean_git()
     # Remove temporary directory + install script
     rm -rf _generated
     rm -f install.sh
+    # auto-removal of this file doesn't work on CirleCi
+    rm -f test/compilable/vcg-ast.d.cg
     # Ensure that there are no untracked changes
     make -f posix.mak check-clean-git
+}
+
+# sanitycheck for the run_individual_tests script
+check_run_individual()
+{
+    local build_path=generated/linux/release/$MODEL
+	"${build_path}/dmd"  -i -run ./test/run_individual_tests.d test/runnable/template2962.d ./test/compilable/test14275.d
 }
 
 codecov()
@@ -146,7 +183,16 @@ codecov()
 case $1 in
     install-deps) install_deps ;;
     setup-repos) setup_repos ;;
-    coverage) coverage ;;
-    check-clean-git) check_clean_git;;
-    codecov) codecov ;;
+    coverage) echo "removed" ;;
+    check-clean-git) echo "removed" ;;
+    codecov)
+        echo "removed - use 'all'"
+        # Fall-through is used to maintain compatibility with the existing PRs
+        ;&
+    all)
+        coverage;
+        check_clean_git;
+        check_run_individual;
+        codecov;
+    ;;
 esac

@@ -21,7 +21,8 @@ import core.stdc.stdint;
 
 import dmd.backend.cdef;
 import dmd.backend.cc;
-import dmd.backend.cc : Symbol, block, Classsym, Blockx, code;
+import dmd.backend.cc : Symbol, block, Classsym, Blockx;
+import dmd.backend.code_x86 : code;
 import dmd.backend.code;
 import dmd.backend.el;
 import dmd.backend.el : elem;
@@ -70,7 +71,7 @@ extern __gshared
 //    Config config;                  // precompiled part of configuration
 //    char[SCMAX] sytab;
 
-    //volatile int controlc_saw;    // a control C was seen
+    extern (C) /*volatile*/ int controlc_saw;    // a control C was seen
     uint maxblks;                   // array max for all block stuff
     uint numblks;                   // number of basic blocks (if optimized)
     block* startblock;              // beginning block of function
@@ -99,11 +100,12 @@ __gshared Configv configv;                // non-ph part of configuration
 Symbol *asm_define_label(const(char)* id);
 
 // cpp.c
-//#if SCPP || MARS
-//char *cpp_mangle(Symbol* s);
-//#else
-//#define cpp_mangle(s)   ((s)->Sident)
-//#endif
+version (SCPP)
+    char* cpp_mangle(Symbol* s);
+else version (MARS)
+    char* cpp_mangle(Symbol* s);
+else
+    char* cpp_mangle(Symbol* s) { return &s.Sident[0]; }
 
 // ee.c
 void eecontext_convs(uint marksi);
@@ -297,7 +299,9 @@ void os_heapterm();
 void os_term();
 uint os_unique();
 int os_file_exists(const(char)* name);
+int os_file_mtime(const(char)* name);
 int os_file_size(int fd);
+int os_file_size(const(char)* filename);
 char *file_8dot3name(const(char)* filename);
 int file_write(char *name, void *buffer, uint len);
 int file_createdirs(char *name);
@@ -476,6 +480,30 @@ version (SCPP)
     void srcpos_hydrate(Srcpos *);
     void srcpos_dehydrate(Srcpos *);
 }
+version (SPP)
+{
+    extern __gshared Srcfiles srcfiles;
+    Sfile **filename_indirect(Sfile *sf);
+    Sfile  *filename_search(const(char)* name);
+    Sfile *filename_add(const(char)* name);
+    int filename_cmp(const(char)* f1,const(char)* f2);
+    void filename_translate(Srcpos *);
+}
+version (HTOD)
+{
+    extern __gshared Srcfiles srcfiles;
+    Sfile **filename_indirect(Sfile *sf);
+    Sfile  *filename_search(const(char)* name);
+    Sfile *filename_add(const(char)* name);
+    void filename_hydrate(Srcfiles *fn);
+    void filename_dehydrate(Srcfiles *fn);
+    void filename_merge(Srcfiles *fn);
+    void filename_mergefl(Sfile *sf);
+    int filename_cmp(const(char)* f1,const(char)* f2);
+    void filename_translate(Srcpos *);
+    void srcpos_hydrate(Srcpos *);
+    void srcpos_dehydrate(Srcpos *);
+}
 
 // tdb.c
 uint tdb_gettimestamp();
@@ -498,7 +526,7 @@ void dwarf_CFA_set_reg_offset(int reg, int offset);
 void dwarf_CFA_offset(int reg, int offset);
 void dwarf_CFA_args_size(size_t sz);
 
-// TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
+// TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_DRAGONFLYBSD || TARGET_SOLARIS
 elem *exp_isconst();
 elem *lnx_builtin_next_arg(elem *efunc,list_t arglist);
 char *lnx_redirect_funcname(const(char)*);

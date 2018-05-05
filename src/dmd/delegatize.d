@@ -44,10 +44,10 @@ extern (C++) Expression toDelegate(Expression e, Type t, Scope* sc)
 {
     //printf("Expression::toDelegate(t = %s) %s\n", t.toChars(), e.toChars());
     Loc loc = e.loc;
-    auto tf = new TypeFunction(null, t, 0, LINKd);
+    auto tf = new TypeFunction(null, t, 0, LINK.d);
     if (t.hasWild())
-        tf.mod = MODwild;
-    auto fld = new FuncLiteralDeclaration(loc, loc, tf, TOKdelegate, null);
+        tf.mod = MODFlags.wild;
+    auto fld = new FuncLiteralDeclaration(loc, loc, tf, TOK.delegate_, null);
     lambdaSetParent(e, fld);
 
     sc = sc.push();
@@ -155,20 +155,20 @@ extern (C++) bool lambdaCheckForNestedRef(Expression e, Scope* sc)
         {
             VarDeclaration v = e.var.isVarDeclaration();
             if (v)
-                result = v.checkNestedReference(sc, Loc());
+                result = v.checkNestedReference(sc, Loc.initial);
         }
 
         override void visit(VarExp e)
         {
             VarDeclaration v = e.var.isVarDeclaration();
             if (v)
-                result = v.checkNestedReference(sc, Loc());
+                result = v.checkNestedReference(sc, Loc.initial);
         }
 
         override void visit(ThisExp e)
         {
             if (e.var)
-                result = e.var.checkNestedReference(sc, Loc());
+                result = e.var.checkNestedReference(sc, Loc.initial);
         }
 
         override void visit(DeclarationExp e)
@@ -176,7 +176,7 @@ extern (C++) bool lambdaCheckForNestedRef(Expression e, Scope* sc)
             VarDeclaration v = e.declaration.isVarDeclaration();
             if (v)
             {
-                result = v.checkNestedReference(sc, Loc());
+                result = v.checkNestedReference(sc, Loc.initial);
                 if (result)
                     return;
                 /* Some expressions cause the frontend to create a temporary.
@@ -230,7 +230,7 @@ bool ensureStaticLinkTo(Dsymbol s, Dsymbol p)
             // https://issues.dlang.org/show_bug.cgi?id=15332
             // change to delegate if fd is actually nested.
             if (auto fld = fd.isFuncLiteralDeclaration())
-                fld.tok = TOKdelegate;
+                fld.tok = TOK.delegate_;
         }
         if (auto ad = s.isAggregateDeclaration())
         {

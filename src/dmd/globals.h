@@ -74,7 +74,7 @@ struct Param
     bool vcg_ast;       // write-out codegen-ast
     bool showColumns;   // print character (column) numbers in diagnostics
     bool vtls;          // identify thread local variables
-    char vgc;           // identify gc usage
+    bool vgc;           // identify gc usage
     bool vfield;        // identify non-mutable field variables
     bool vcomplex;      // identify complex/imaginary type usage
     char symdebug;      // insert debug symbolic information
@@ -89,6 +89,7 @@ struct Param
     bool isWindows;     // generate code for Windows
     bool isFreeBSD;     // generate code for FreeBSD
     bool isOpenBSD;     // generate code for OpenBSD
+    bool isDragonFlyBSD;// generate code for DragonFlyBSD
     bool isSolaris;     // generate code for Solaris
     bool hasObjectiveC; // target supports Objective-C
     bool mscoff;        // for Win32: write COFF object files instead of OMF
@@ -164,6 +165,7 @@ struct Param
 
     bool doJsonGeneration;    // write JSON file
     const char *jsonfilename; // write JSON file to jsonfilename
+    unsigned jsonFieldFlags;  // JSON field flags to include
 
     unsigned debuglevel;   // debug level
     Array<const char *> *debugids;     // debug identifiers
@@ -231,7 +233,6 @@ struct Global
     Param params;
     unsigned errors;       // number of errors reported so far
     unsigned warnings;     // number of warnings reported so far
-    FILE *stdmsg;          // where to send verbose messages
     unsigned gag;          // !=0 means gag reporting of errors & warnings
     unsigned gaggedErrors; // number of errors reported while gagged
 
@@ -256,6 +257,11 @@ struct Global
     void increaseErrorCount();
 
     void _init();
+
+    /**
+    Returns: the version as the number that would be returned for __VERSION__
+    */
+    unsigned versionNumber();
 };
 
 extern Global global;
@@ -297,7 +303,7 @@ struct DArray
 // file location
 struct Loc
 {
-    const char *filename;
+    const char *filename; // either absolute or relative to cwd
     unsigned linnum;
     unsigned charnum;
 

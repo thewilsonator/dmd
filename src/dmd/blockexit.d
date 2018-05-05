@@ -94,12 +94,12 @@ int blockExit(Statement s, FuncDeclaration func, bool mustNotThrow)
             result = BE.fallthru;
             if (s.exp)
             {
-                if (s.exp.op == TOKhalt)
+                if (s.exp.op == TOK.halt)
                 {
                     result = BE.halt;
                     return;
                 }
-                if (s.exp.op == TOKassert)
+                if (s.exp.op == TOK.assert_)
                 {
                     AssertExp a = cast(AssertExp)s.exp;
                     if (a.e1.isBool(false)) // if it's an assert(0)
@@ -363,7 +363,7 @@ int blockExit(Statement s, FuncDeclaration func, bool mustNotThrow)
 
         override void visit(ContinueStatement s)
         {
-            result = s.ident ? BE.goto_ : BE.continue_;
+            result = s.ident ? BE.continue_ | BE.goto_ : BE.continue_;
         }
 
         override void visit(SynchronizedStatement s)
@@ -513,7 +513,7 @@ int blockExit(Statement s, FuncDeclaration func, bool mustNotThrow)
             if (!(s.stc & STC.nothrow_))
             {
                 if (mustNotThrow && !(s.stc & STC.nothrow_))
-                    s.deprecation("asm statement is assumed to throw - mark it with `nothrow` if it does not");
+                    s.deprecation("`asm` statement is assumed to throw - mark it with `nothrow` if it does not");
                 else
                     result |= BE.throw_;
             }

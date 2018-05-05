@@ -172,7 +172,7 @@ Symbol *toSymbol(Dsymbol s)
             }
             else if (vd.isParameter())
             {
-                if (config.exe == EX_WIN64 && vd.type.size(Loc()) > _tysize[TYnptr])
+                if (config.exe == EX_WIN64 && vd.type.size(Loc.initial) > _tysize[TYnptr])
                 {
                     t = type_allocn(TYnref, Type_toCtype(vd.type));
                     t.Tcount++;
@@ -205,10 +205,7 @@ Symbol *toSymbol(Dsymbol s)
 
                     if (global.params.vtls)
                     {
-                        const(char)* p = vd.loc.toChars();
-                        fprintf(global.stdmsg, "%s: %s is thread local\n", p ? p : "", vd.toChars());
-                        if (p)
-                            mem.xfree(cast(void*)p);
+                        message(vd.loc, "`%s` is thread local", vd.toChars());
                     }
                 }
                 s.Sclass = SCextern;
@@ -243,29 +240,30 @@ Symbol *toSymbol(Dsymbol s)
             }
 
             mangle_t m = 0;
-            switch (vd.linkage)
+            final switch (vd.linkage)
             {
-                case LINKwindows:
+                case LINK.windows:
                     m = global.params.is64bit ? mTYman_c : mTYman_std;
                     break;
 
-                case LINKpascal:
+                case LINK.pascal:
                     m = mTYman_pas;
                     break;
 
-                case LINKobjc:
-                case LINKc:
+                case LINK.objc:
+                case LINK.c:
                     m = mTYman_c;
                     break;
 
-                case LINKd:
+                case LINK.d:
                     m = mTYman_d;
                     break;
-                case LINKcpp:
+                case LINK.cpp:
                     s.Sflags |= SFLpublic;
-                    m = mTYman_d;
+                    m = mTYman_cpp;
                     break;
-                default:
+                case LINK.default_:
+                case LINK.system:
                     printf("linkage = %d, vd = %s %s @ [%s]\n",
                         vd.linkage, vd.kind(), vd.toChars(), vd.loc.toChars());
                     assert(0);
@@ -341,26 +339,26 @@ Symbol *toSymbol(Dsymbol s)
             }
             else
             {
-                switch (fd.linkage)
+                final switch (fd.linkage)
                 {
-                    case LINKwindows:
+                    case LINK.windows:
                         t.Tmangle = global.params.is64bit ? mTYman_c : mTYman_std;
                         break;
 
-                    case LINKpascal:
+                    case LINK.pascal:
                         t.Tty = TYnpfunc;
                         t.Tmangle = mTYman_pas;
                         break;
 
-                    case LINKc:
-                    case LINKobjc:
+                    case LINK.c:
+                    case LINK.objc:
                         t.Tmangle = mTYman_c;
                         break;
 
-                    case LINKd:
+                    case LINK.d:
                         t.Tmangle = mTYman_d;
                         break;
-                    case LINKcpp:
+                    case LINK.cpp:
                         s.Sflags |= SFLpublic;
                         if (fd.isThis() && !global.params.is64bit && global.params.isWindows)
                         {
@@ -373,9 +371,10 @@ Symbol *toSymbol(Dsymbol s)
                                 t.Tty = TYmfunc;
                             }
                         }
-                        t.Tmangle = mTYman_d;
+                        t.Tmangle = mTYman_cpp;
                         break;
-                    default:
+                    case LINK.default_:
+                    case LINK.system:
                         printf("linkage = %d\n", fd.linkage);
                         assert(0);
                 }
@@ -534,7 +533,7 @@ Classsym *fake_classsym(Identifier id)
 {
     auto t = type_struct_class(id.toChars(),8,0,
         null,null,
-        false, false, true);
+        false, false, true, false);
 
     t.Ttag.Sstruct.Sflags = STRglobal;
     t.Tflags |= TFsizeunknown | TFforward;

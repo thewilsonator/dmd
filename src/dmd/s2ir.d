@@ -494,7 +494,6 @@ private extern (C++) class S2irVisitor : Visitor
     override void visit(SwitchStatement s)
 //    { .visit(irs, s); }
     {
-        int string;
         Blockx *blx = irs.blx;
 
         //printf("SwitchStatement.toIR()\n");
@@ -721,7 +720,7 @@ private extern (C++) class S2irVisitor : Visitor
             TypeFunction tf = cast(TypeFunction)(func.type);
 
             RET retmethod = retStyle(tf);
-            if (retmethod == RETstack)
+            if (retmethod == RET.stack)
             {
                 elem *es;
                 bool writetohp;
@@ -729,31 +728,53 @@ private extern (C++) class S2irVisitor : Visitor
                 /* If returning struct literal, write result
                  * directly into return value
                  */
-                if (s.exp.op == TOKstructliteral)
+                if (s.exp.op == TOK.structLiteral)
                 {
                     StructLiteralExp sle = cast(StructLiteralExp)s.exp;
                     sle.sym = irs.shidden;
                     writetohp = true;
                 }
-                /* Detect:
-                 *    structliteral.ctor(args)
+                /* Detect function call that returns the same struct
                  * and construct directly into *shidden
                  */
-                else if (s.exp.op == TOKcall)
+                else if (s.exp.op == TOK.call)
                 {
                     auto ce = cast(CallExp)s.exp;
-                    if (ce.e1.op == TOKdotvar)
+                    if (ce.e1.op == TOK.variable || ce.e1.op == TOK.star)
+                    {
+                        Type t = ce.e1.type.toBasetype();
+                        if (t.ty == Tdelegate)
+                            t = t.nextOf();
+                        if (t.ty == Tfunction && retStyle(cast(TypeFunction)t) == RET.stack)
+                        {
+                            irs.ehidden = el_var(irs.shidden);
+                            e = toElemDtor(s.exp, irs);
+                            e = el_una(OPaddr, TYnptr, e);
+                            goto L1;
+                        }
+                    }
+                    else if (ce.e1.op == TOK.dotVariable)
                     {
                         auto dve = cast(DotVarExp)ce.e1;
                         auto fd = dve.var.isFuncDeclaration();
                         if (fd && fd.isCtorDeclaration())
                         {
-                            if (dve.e1.op == TOKstructliteral)
+                            if (dve.e1.op == TOK.structLiteral)
                             {
                                 auto sle = cast(StructLiteralExp)dve.e1;
                                 sle.sym = irs.shidden;
                                 writetohp = true;
                             }
+                        }
+                        Type t = ce.e1.type.toBasetype();
+                        if (t.ty == Tdelegate)
+                            t = t.nextOf();
+                        if (t.ty == Tfunction && retStyle(cast(TypeFunction)t) == RET.stack)
+                        {
+                            irs.ehidden = el_var(irs.shidden);
+                            e = toElemDtor(s.exp, irs);
+                            e = el_una(OPaddr, TYnptr, e);
+                            goto L1;
                         }
                     }
                 }
@@ -771,15 +792,8 @@ private extern (C++) class S2irVisitor : Visitor
                 {
                     // Return value via hidden pointer passed as parameter
                     // Write *shidden=exp; return shidden;
-                    int op;
-                    tym_t ety;
-
-                    ety = e.Ety;
-                    es = el_una(OPind,ety,el_var(irs.shidden));
-                    op = (tybasic(ety) == TYstruct) ? OPstreq : OPeq;
-                    es = el_bin(op, ety, es, e);
-                    if (op == OPstreq)
-                        es.ET = Type_toCtype(s.exp.type);
+                    es = el_una(OPind,e.Ety,el_var(irs.shidden));
+                    es = elAssign(es, e, s.exp.type, null);
                 }
                 e = el_var(irs.shidden);
                 e = el_bin(OPcomma, e.Ety, es, e);
@@ -795,9 +809,12 @@ private extern (C++) class S2irVisitor : Visitor
                 e = toElemDtor(s.exp, irs);
                 assert(e);
             }
+        L1:
             elem_setLoc(e, s.loc);
             block_appendexp(blx.curblock, e);
             bc = BCretexp;
+//            if (type_zeroCopy(Type_toCtype(s.exp.type)))
+//                bc = BCret;
         }
         else
             bc = BCret;
@@ -919,7 +936,7 @@ private extern (C++) class S2irVisitor : Visitor
         Blockx *blx = irs.blx;
 
         //printf("WithStatement.toIR()\n");
-        if (s.exp.op == TOKscope || s.exp.op == TOKtype)
+        if (s.exp.op == TOK.scope_ || s.exp.op == TOK.type)
         {
         }
         else
@@ -1165,11 +1182,11 @@ private extern (C++) class S2irVisitor : Visitor
                          * At some point should try to do better.
                          */
                         FuncDeclaration fdend = FuncDeclaration.genCfunc(null, Type.tvoid, "__cxa_end_catch");
-                        Expression ec = VarExp.create(Loc(), fdend);
-                        Expression ecc = CallExp.create(Loc(), ec);
+                        Expression ec = VarExp.create(Loc.initial, fdend);
+                        Expression ecc = CallExp.create(Loc.initial, ec);
                         ecc.type = Type.tvoid;
-                        Statement sf = ExpStatement.create(Loc(), ecc);
-                        Statement stf = TryFinallyStatement.create(Loc(), cs.handler, sf);
+                        Statement sf = ExpStatement.create(Loc.initial, ecc);
+                        Statement stf = TryFinallyStatement.create(Loc.initial, cs.handler, sf);
                         Statement_toIR(stf, &catchState);
                     }
                     else
@@ -1364,8 +1381,31 @@ private extern (C++) class S2irVisitor : Visitor
              *  BC_ret
              *  breakblock
              */
-            blx.curblock.appendSucc(breakblock);
-            block_next(blx,BCgoto,finallyblock);
+            if (s.bodyFallsThru)
+            {
+                // BCgoto [breakblock]
+                blx.curblock.appendSucc(breakblock);
+                block_next(blx,BCgoto,finallyblock);
+            }
+            else
+            {
+                if (!global.params.optimize)
+                {
+                    /* If this is reached at runtime, there's a bug
+                     * in the computation of s.bodyFallsThru. Inserting a HALT
+                     * makes it far easier to track down such failures.
+                     * But it makes for slower code, so only generate it for
+                     * non-optimized code.
+                     */
+                    elem *e = el_calloc();
+                    e.Ety = TYvoid;
+                    e.Eoper = OPhalt;
+                    elem_setLoc(e, s.loc);
+                    block_appendexp(blx.curblock, e);
+                }
+
+                block_next(blx,BCexit,finallyblock);
+            }
 
             block *landingPad = block_goto(blx,BC_finally,null);
             block_goto(blx,BC_lpad,null);               // lpad is [0]
@@ -1648,16 +1688,7 @@ void insertFinallyBlockCalls(block *startblock)
                 }
                 b.BC = BCgoto;
                 b.appendSucc(bcretexp);
-
-                elem *eeq = el_bin(OPeq,e.Ety,el_var(stmp),e);
-                if (ty == TYstruct || ty == TYarray)
-                {
-                    eeq.Eoper = OPstreq;
-                    eeq.ET = e.ET;
-                    eeq.EV.E1.ET = e.ET;
-                }
-                b.Belem = eeq;
-
+                b.Belem = elAssign(el_var(stmp), e, null, e.ET);
                 goto case_goto;
             }
 

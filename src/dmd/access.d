@@ -189,9 +189,9 @@ extern (C++) bool checkAccess(AggregateDeclaration ad, Loc loc, Scope* sc, Dsymb
             printf("result4 = %d\n", result);
         }
     }
-    if (!result)
+    if (!result && (!(sc.flags & SCOPE.onlysafeaccess) || sc.func.setUnsafe()))
     {
-        ad.error(loc, "member `%s` is not accessible", smember.toChars());
+        ad.error(loc, "member `%s` is not accessible%s", smember.toChars(), (sc.flags & SCOPE.onlysafeaccess) ? " from `@safe` code".ptr : "".ptr);
         //printf("smember = %s %s, prot = %d, semanticRun = %d\n",
         //        smember.kind(), smember.toPrettyChars(), smember.prot(), smember.semanticRun);
         return true;
@@ -421,7 +421,7 @@ extern (C++) bool checkAccess(Loc loc, Scope* sc, Expression e, Declaration d)
     {
         // Do access check
         ClassDeclaration cd = (cast(TypeClass)e.type).sym;
-        if (e.op == TOKsuper)
+        if (e.op == TOK.super_)
         {
             ClassDeclaration cd2 = sc.func.toParent().isClassDeclaration();
             if (cd2)
@@ -462,10 +462,10 @@ extern (C++) bool checkAccess(Loc loc, Scope* sc, Package p)
             return false;
     }
     auto name = p.toPrettyChars();
-    if (p.isPkgMod == PKGmodule || p.isModule())
-        deprecation(loc, "%s %s is not accessible here, perhaps add 'static import %s;'", p.kind(), name, name);
+    if (p.isPkgMod == PKG.module_ || p.isModule())
+        deprecation(loc, "%s `%s` is not accessible here, perhaps add `static import %s;`", p.kind(), name, name);
     else
-        deprecation(loc, "%s %s is not accessible here", p.kind(), name);
+        deprecation(loc, "%s `%s` is not accessible here", p.kind(), name);
     return true;
 }
 
@@ -512,6 +512,20 @@ extern (C++) bool symbolIsVisible(Dsymbol origin, Dsymbol s)
 extern (C++) bool symbolIsVisible(Scope *sc, Dsymbol s)
 {
     s = mostVisibleOverload(s);
+    return checkSymbolAccess(sc, s);
+}
+
+/**
+ * Check if a symbol is visible from a given scope without taking
+ * into account the most visible overload.
+ *
+ * Params:
+ *  sc = lookup scope
+ *  s = symbol to check for visibility
+ * Returns: true if s is visible by origin
+ */
+extern (C++) bool checkSymbolAccess(Scope *sc, Dsymbol s)
+{
     final switch (s.prot().kind)
     {
     case Prot.Kind.undefined: return true;
@@ -529,7 +543,7 @@ extern (C++) bool symbolIsVisible(Scope *sc, Dsymbol s)
  * but doesn't recurse nor resolve aliases because protection/visibility is an
  * attribute of the alias not the aliasee.
  */
-private Dsymbol mostVisibleOverload(Dsymbol s)
+public Dsymbol mostVisibleOverload(Dsymbol s)
 {
     if (!s.isOverloadable())
         return s;
@@ -557,9 +571,10 @@ private Dsymbol mostVisibleOverload(Dsymbol s)
         // private void name(int) {}
         else if (auto ad = s.isAliasDeclaration())
         {
-            assert(ad.isOverloadable, "Non overloadable Aliasee in overload list");
+            assert(ad.isOverloadable || ad.type && ad.type.ty == Terror,
+                "Non overloadable Aliasee in overload list");
             // Yet unresolved aliases store overloads in overnext.
-            if (ad.semanticRun < PASSsemanticdone)
+            if (ad.semanticRun < PASS.semanticdone)
                 next = ad.overnext;
             else
             {

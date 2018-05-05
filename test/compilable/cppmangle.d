@@ -364,13 +364,7 @@ extern(C++)
     }
 }
 
-version (OSX)
-{
-    static assert(T.foo.mangleof == "__ZNK1T3fooEi");
-    static assert(T.bar.mangleof == "__ZN1T3barEi");
-    static assert(T.boo.mangleof == "__ZN1T3booE");
-}
-else version (Posix)
+version (Posix)
 {
     static assert(T.foo.mangleof == "_ZNK1T3fooEi");
     static assert(T.bar.mangleof == "_ZN1T3barEi");
@@ -444,3 +438,15 @@ version (linux)
 {
     static assert(test36.mangleof == "_Z6test36PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPiPS12_");
 }
+
+/*****************************************/
+// https://issues.dlang.org/show_bug.cgi?id=17772
+
+extern(C++, SPACE)
+int test37(T)(){ return 0;}
+
+version (Posix) // all non-Windows machines
+{
+    static assert(test37!int.mangleof == "_ZN5SPACE6test37IiEEiv");
+}
+

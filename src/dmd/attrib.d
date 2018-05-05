@@ -38,7 +38,7 @@ extern (C++) abstract class AttribDeclaration : Dsymbol
 {
     Dsymbols* decl;     // array of Dsymbol's
 
-    final extern (D) this(Dsymbols* decl)
+    extern (D) this(Dsymbols* decl)
     {
         this.decl = decl;
     }
@@ -278,7 +278,7 @@ extern (C++) class StorageClassDeclaration : AttribDeclaration
 {
     StorageClass stc;
 
-    final extern (D) this(StorageClass stc, Dsymbols* decl)
+    extern (D) this(StorageClass stc, Dsymbols* decl)
     {
         super(decl);
         this.stc = stc;
@@ -439,7 +439,7 @@ extern (C++) final class LinkDeclaration : AttribDeclaration
     {
         super(decl);
         //printf("LinkDeclaration(linkage = %d, decl = %p)\n", p, decl);
-        linkage = (p == LINKsystem) ? Target.systemLinkage() : p;
+        linkage = (p == LINK.system) ? Target.systemLinkage() : p;
     }
 
     static LinkDeclaration create(LINK p, Dsymbols* decl)
@@ -491,7 +491,7 @@ extern (C++) final class CPPMangleDeclaration : AttribDeclaration
 
     override Scope* newScope(Scope* sc)
     {
-        return createNewScope(sc, sc.stc, LINKcpp, cppmangle, sc.protection, sc.explicitProtection,
+        return createNewScope(sc, sc.stc, LINK.cpp, cppmangle, sc.protection, sc.explicitProtection,
             sc.aligndecl, sc.inlining);
     }
 
@@ -519,7 +519,7 @@ extern (C++) final class ProtDeclaration : AttribDeclaration
      *  p = protection attribute data
      *  decl = declarations which are affected by this protection attribute
      */
-    extern (D) this(Loc loc, Prot p, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Prot p, Dsymbols* decl)
     {
         super(decl);
         this.loc = loc;
@@ -533,13 +533,18 @@ extern (C++) final class ProtDeclaration : AttribDeclaration
      *  pkg_identifiers = list of identifiers for a qualified package name
      *  decl = declarations which are affected by this protection attribute
      */
-    extern (D) this(Loc loc, Identifiers* pkg_identifiers, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Identifiers* pkg_identifiers, Dsymbols* decl)
     {
         super(decl);
         this.loc = loc;
         this.protection.kind = Prot.Kind.package_;
-        this.protection.pkg = null;
         this.pkg_identifiers = pkg_identifiers;
+        if (pkg_identifiers !is null && pkg_identifiers.dim > 0)
+        {
+            Dsymbol tmp;
+            Package.resolve(pkg_identifiers, &tmp, null);
+            protection.pkg = tmp ? tmp.isPackage() : null;
+        }
     }
 
     override Dsymbol syntaxCopy(Dsymbol s)
@@ -586,10 +591,13 @@ extern (C++) final class ProtDeclaration : AttribDeclaration
     {
         assert(protection.kind > Prot.Kind.undefined);
         OutBuffer buf;
-        buf.writeByte('\'');
         protectionToBuffer(&buf, protection);
-        buf.writeByte('\'');
         return buf.extractString();
+    }
+
+    override final inout(ProtDeclaration) isProtDeclaration() inout
+    {
+        return this;
     }
 
     override void accept(Visitor v)
@@ -607,7 +615,7 @@ extern (C++) final class AlignDeclaration : AttribDeclaration
     static assert(STRUCTALIGN_DEFAULT != UNKNOWN);
     structalign_t salign = UNKNOWN;
 
-    extern (D) this(Loc loc, Expression ealign, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Expression ealign, Dsymbols* decl)
     {
         super(decl);
         this.loc = loc;
@@ -642,7 +650,7 @@ extern (C++) final class AnonDeclaration : AttribDeclaration
     uint anonstructsize;    // size of anonymous struct
     uint anonalignsize;     // size of anonymous struct for alignment purposes
 
-    extern (D) this(Loc loc, bool isunion, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, bool isunion, Dsymbols* decl)
     {
         super(decl);
         this.loc = loc;
@@ -760,7 +768,7 @@ extern (C++) final class PragmaDeclaration : AttribDeclaration
 {
     Expressions* args;      // array of Expression's
 
-    extern (D) this(Loc loc, Identifier ident, Expressions* args, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Identifier ident, Expressions* args, Dsymbols* decl)
     {
         super(decl);
         this.loc = loc;
@@ -779,9 +787,9 @@ extern (C++) final class PragmaDeclaration : AttribDeclaration
     {
         if (ident == Id.Pinline)
         {
-            PINLINE inlining = PINLINEdefault;
+            PINLINE inlining = PINLINE.default_;
             if (!args || args.dim == 0)
-                inlining = PINLINEdefault;
+                inlining = PINLINE.default_;
             else if (args.dim != 1)
             {
                 error("one boolean expression expected for `pragma(inline)`, not %d", args.dim);
@@ -791,18 +799,18 @@ extern (C++) final class PragmaDeclaration : AttribDeclaration
             else
             {
                 Expression e = (*args)[0];
-                if (e.op != TOKint64 || !e.type.equals(Type.tbool))
+                if (e.op != TOK.int64 || !e.type.equals(Type.tbool))
                 {
-                    if (e.op != TOKerror)
+                    if (e.op != TOK.error)
                     {
                         error("pragma(`inline`, `true` or `false`) expected, not `%s`", e.toChars());
                         (*args)[0] = new ErrorExp();
                     }
                 }
                 else if (e.isBool(true))
-                    inlining = PINLINEalways;
+                    inlining = PINLINE.always;
                 else if (e.isBool(false))
-                    inlining = PINLINEnever;
+                    inlining = PINLINE.never;
             }
             return createNewScope(sc, sc.stc, sc.linkage, sc.cppmangle, sc.protection, sc.explicitProtection, sc.aligndecl, inlining);
         }
@@ -827,7 +835,7 @@ extern (C++) class ConditionalDeclaration : AttribDeclaration
     Condition condition;
     Dsymbols* elsedecl;     // array of Dsymbol's for else block
 
-    final extern (D) this(Condition condition, Dsymbols* decl, Dsymbols* elsedecl)
+    extern (D) this(Condition condition, Dsymbols* decl, Dsymbols* elsedecl)
     {
         super(decl);
         //printf("ConditionalDeclaration::ConditionalDeclaration()\n");
@@ -1207,7 +1215,7 @@ extern (C++) final class CompileDeclaration : AttribDeclaration
     ScopeDsymbol scopesym;
     bool compiled;
 
-    extern (D) this(Loc loc, Expression exp)
+    extern (D) this(const ref Loc loc, Expression exp)
     {
         super(null);
         //printf("CompileDeclaration(loc = %d)\n", loc.linnum);
@@ -1298,8 +1306,8 @@ extern (C++) final class UserAttributeDeclaration : AttribDeclaration
              * (do not append to left operand, as this is a copy-on-write operation)
              */
             udas = new Expressions();
-            udas.push(new TupleExp(Loc(), udas1));
-            udas.push(new TupleExp(Loc(), udas2));
+            udas.push(new TupleExp(Loc.initial, udas1));
+            udas.push(new TupleExp(Loc.initial, udas2));
         }
         return udas;
     }
@@ -1313,9 +1321,9 @@ extern (C++) final class UserAttributeDeclaration : AttribDeclaration
         }
         auto exps = new Expressions();
         if (userAttribDecl)
-            exps.push(new TupleExp(Loc(), userAttribDecl.getAttributes()));
+            exps.push(new TupleExp(Loc.initial, userAttribDecl.getAttributes()));
         if (atts && atts.dim)
-            exps.push(new TupleExp(Loc(), atts));
+            exps.push(new TupleExp(Loc.initial, atts));
         return exps;
     }
 

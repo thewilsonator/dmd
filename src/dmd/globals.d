@@ -13,7 +13,6 @@
 module dmd.globals;
 
 import core.stdc.stdint;
-import core.stdc.stdio;
 import dmd.root.array;
 import dmd.root.filename;
 import dmd.root.outbuffer;
@@ -25,14 +24,16 @@ template xversion(string s)
     enum xversion = mixin(`{ version (` ~ s ~ `) return true; else return false; }`)();
 }
 
-enum IN_GCC     = xversion!`IN_GCC`;
-
-enum TARGET_LINUX   = xversion!`linux`;
-enum TARGET_OSX     = xversion!`OSX`;
-enum TARGET_FREEBSD = xversion!`FreeBSD`;
-enum TARGET_OPENBSD = xversion!`OpenBSD`;
-enum TARGET_SOLARIS = xversion!`Solaris`;
-enum TARGET_WINDOS  = xversion!`Windows`;
+enum TARGET : bool
+{
+    Linux        = xversion!`linux`,
+    OSX          = xversion!`OSX`,
+    FreeBSD      = xversion!`FreeBSD`,
+    OpenBSD      = xversion!`OpenBSD`,
+    Solaris      = xversion!`Solaris`,
+    Windows      = xversion!`Windows`,
+    DragonFlyBSD = xversion!`DragonFlyBSD`,
+}
 
 enum CHECKENABLE : ubyte
 {
@@ -67,6 +68,20 @@ enum CPU
     native              // the machine the compiler is being run on
 }
 
+/**
+Each flag represents a field that can be included in the JSON output.
+
+NOTE: set type to uint so its size matches C++ unsigned type
+*/
+enum JsonFieldFlags : uint
+{
+    none         = 0,
+    compilerInfo = (1 << 0),
+    buildInfo    = (1 << 1),
+    modules      = (1 << 2),
+    semantics    = (1 << 3),
+}
+
 // Put command line switches in here
 struct Param
 {
@@ -97,6 +112,7 @@ struct Param
     bool isWindows;         // generate code for Windows
     bool isFreeBSD;         // generate code for FreeBSD
     bool isOpenBSD;         // generate code for OpenBSD
+    bool isDragonFlyBSD;    // generate code for DragonFlyBSD
     bool isSolaris;         // generate code for Solaris
     bool hasObjectiveC;     // target supports Objective-C
     bool mscoff = false;    // for Win32: write MsCoff object files instead of OMF
@@ -178,6 +194,7 @@ struct Param
 
     bool doJsonGeneration;              // write JSON file
     const(char)* jsonfilename;          // write JSON file to jsonfilename
+    JsonFieldFlags jsonFieldFlags;      // JSON field flags to include
 
     uint debuglevel;                    // debug level
     Array!(const(char)*)* debugids;     // debug identifiers
@@ -246,7 +263,6 @@ struct Global
     Param params;
     uint errors;            // number of errors reported so far
     uint warnings;          // number of warnings reported so far
-    FILE* stdmsg;           // where to send verbose messages
     uint gag;               // !=0 means gag reporting of errors & warnings
     uint gaggedErrors;      // number of errors reported while gagged
 
@@ -290,11 +306,11 @@ struct Global
 
     extern (C++) void _init()
     {
-        static if (TARGET_WINDOS)
+        static if (TARGET.Windows)
         {
             obj_ext = "obj";
         }
-        else static if (TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS)
+        else static if (TARGET.Linux || TARGET.OSX || TARGET.FreeBSD || TARGET.OpenBSD || TARGET.Solaris || TARGET.DragonFlyBSD)
         {
             obj_ext = "o";
         }
@@ -302,11 +318,11 @@ struct Global
         {
             static assert(0, "fix this");
         }
-        static if (TARGET_WINDOS)
+        static if (TARGET.Windows)
         {
             lib_ext = "lib";
         }
-        else static if (TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS)
+        else static if (TARGET.Linux || TARGET.OSX || TARGET.FreeBSD || TARGET.OpenBSD || TARGET.Solaris || TARGET.DragonFlyBSD)
         {
             lib_ext = "a";
         }
@@ -314,15 +330,15 @@ struct Global
         {
             static assert(0, "fix this");
         }
-        static if (TARGET_WINDOS)
+        static if (TARGET.Windows)
         {
             dll_ext = "dll";
         }
-        else static if (TARGET_LINUX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS)
+        else static if (TARGET.Linux || TARGET.FreeBSD || TARGET.OpenBSD || TARGET.Solaris || TARGET.DragonFlyBSD)
         {
             dll_ext = "so";
         }
-        else static if (TARGET_OSX)
+        else static if (TARGET.OSX)
         {
             dll_ext = "dylib";
         }
@@ -330,11 +346,11 @@ struct Global
         {
             static assert(0, "fix this");
         }
-        static if (TARGET_WINDOS)
+        static if (TARGET.Windows)
         {
             run_noext = false;
         }
-        else static if (TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS)
+        else static if (TARGET.Linux || TARGET.OSX || TARGET.FreeBSD || TARGET.OpenBSD || TARGET.Solaris || TARGET.DragonFlyBSD)
         {
             // Allow 'script' D source files to have no extension.
             run_noext = true;
@@ -345,7 +361,44 @@ struct Global
         }
         _version = (import("VERSION") ~ '\0').ptr;
         compiler.vendor = "Digital Mars D";
-        stdmsg = stdout;
+    }
+
+    /**
+    Returns: the version as the number that would be returned for __VERSION__
+    */
+    extern(C++) uint versionNumber()
+    {
+        import core.stdc.ctype;
+        __gshared static uint cached = 0;
+        if (cached == 0)
+        {
+            //
+            // parse _version
+            //
+            uint major = 0;
+            uint minor = 0;
+            bool point = false;
+            for (const(char)* p = _version + 1;; p++)
+            {
+                const c = *p;
+                if (isdigit(cast(char)c))
+                {
+                    minor = minor * 10 + c - '0';
+                }
+                else if (c == '.')
+                {
+                    if (point)
+                        break; // ignore everything after second '.'
+                    point = true;
+                    major = minor;
+                    minor = 0;
+                }
+                else
+                    break;
+            }
+            cached = major * 1000 + minor;
+        }
+        return cached;
     }
 }
 
@@ -373,9 +426,11 @@ alias d_uns64 = uint64_t;
 // file location
 struct Loc
 {
-    const(char)* filename;
+    const(char)* filename; // either absolute or relative to cwd
     uint linnum;
     uint charnum;
+
+    static immutable Loc initial;       /// use for default initialization of const ref Loc's
 
 nothrow:
     extern (D) this(const(char)* filename, uint linnum, uint charnum)
@@ -406,15 +461,26 @@ nothrow:
         return buf.extractString();
     }
 
-    extern (C++) bool equals(ref const(Loc) loc)
+    extern (C++) bool equals(ref const(Loc) loc) const
     {
-        return (!global.params.showColumns || charnum == loc.charnum) && linnum == loc.linnum && FileName.equals(filename, loc.filename);
+        return (!global.params.showColumns || charnum == loc.charnum) &&
+               linnum == loc.linnum &&
+               FileName.equals(filename, loc.filename);
+    }
+
+    /******************
+     * Returns:
+     *   true if Loc has been set to other than the default initialization
+     */
+    bool isValid() const pure
+    {
+        return filename !is null;
     }
 }
 
 enum LINK : int
 {
-    def,        // default
+    default_,
     d,
     c,
     cpp,
@@ -424,25 +490,12 @@ enum LINK : int
     system,
 }
 
-alias LINKdefault = LINK.def;
-alias LINKd = LINK.d;
-alias LINKc = LINK.c;
-alias LINKcpp = LINK.cpp;
-alias LINKwindows = LINK.windows;
-alias LINKpascal = LINK.pascal;
-alias LINKobjc = LINK.objc;
-alias LINKsystem = LINK.system;
-
 enum CPPMANGLE : int
 {
     def,
     asStruct,
     asClass,
 }
-
-alias CPPMANGLEdefault = CPPMANGLE.def;
-alias CPPMANGLEstruct = CPPMANGLE.asStruct;
-alias CPPMANGLEclass = CPPMANGLE.asClass;
 
 enum MATCH : int
 {
@@ -454,14 +507,10 @@ enum MATCH : int
 
 enum PINLINE : int
 {
-    def,     // as specified on the command line
+    default_,     // as specified on the command line
     never,   // never inline
     always,  // always inline
 }
-
-alias PINLINEdefault = PINLINE.def;
-alias PINLINEnever = PINLINE.never;
-alias PINLINEalways = PINLINE.always;
 
 alias StorageClass = uinteger_t;
 

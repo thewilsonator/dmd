@@ -10,6 +10,9 @@ if [ -z ${MODEL+x} ] ; then echo "Variable 'MODEL' needs to be set."; exit 1; fi
 if [ -z ${DMD+x} ] ; then echo "Variable 'DMD' needs to be set."; exit 1; fi
 
 CURL_USER_AGENT="DMD-CI $(curl --version | head -n 1)"
+build_path=generated/$OS_NAME/release/$MODEL
+
+build_path=generated/$OS_NAME/release/$MODEL
 
 # use faster ld.gold linker on linux
 if [ "$OS_NAME" == "linux" ]; then
@@ -28,7 +31,7 @@ clone() {
     local path="$2"
     local branch="$3"
     for i in {0..4}; do
-        if git clone --depth=1 --branch "$branch" "$url" "$path"; then
+        if git clone --depth=1 --branch "$branch" "$url" "$path" --quiet; then
             break
         elif [ $i -lt 4 ]; then
             sleep $((1 << $i))
@@ -50,7 +53,6 @@ build() {
 
 # self-compile dmd
 rebuild() {
-    local build_path=generated/$OS_NAME/release/$MODEL
     local compare=${1:-0}
     # `generated` gets cleaned in the next step, so we create another _generated
     # The nested folder hierarchy is needed to conform to those specified in
@@ -97,11 +99,17 @@ test_dub_package() {
     if [ "${DMD:-dmd}" == "gdmd" ] ; then
         echo "Skipping DUB examples on GDC."
     else
+        local abs_build_path="$PWD/$build_path"
         pushd test/dub_package
         for file in *.d ; do
+            # build with host compiler
             dub --single "$file"
+            # build with built compiler (~master)
+            DFLAGS="-de" dub --single --compiler="${abs_build_path}/dmd" "$file"
         done
         popd
+        # Test rdmd build
+        "${build_path}/dmd" -version=NoBackend -version=GC -version=NoMain -Jgenerated/dub -Jres -Isrc -i -run test/dub_package/frontend.d
     fi
     deactivate
 }
@@ -148,15 +156,15 @@ download_install_sh() {
   done
 }
 
-activate_d() {
+install_d() {
   local install_sh="install.sh"
   download_install_sh "$install_sh"
   # DUB isn't needed for gdc
   if [ "${DMD:-dmd}" == "gdc" ] ; then
-      touch "$HOME/dlang/dub"
+      mkdir -p $HOME/dlang/dub
       # Remove the check of the lastest DUB version
       # shellcheck disable=2016
-      sed 's/dub="dub-$(fetch $url)"/dub=dub' -i "$install_sh"
+      sed 's/dub="dub-$(fetch $url)"/dub=dub/' -i "$install_sh"
   fi
-  CURL_USER_AGENT="$CURL_USER_AGENT" bash "$install_sh" "$1" --activate
+  CURL_USER_AGENT="$CURL_USER_AGENT" bash "$install_sh" "$1"
 }

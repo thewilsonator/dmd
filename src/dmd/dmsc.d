@@ -19,6 +19,9 @@ import core.stdc.stddef;
 extern (C++):
 
 import dmd.globals;
+import dmd.dclass;
+import dmd.dmodule;
+import dmd.mtype;
 
 import dmd.root.filename;
 
@@ -58,7 +61,9 @@ void out_config_init(
         bool alwaysframe,       // always create standard function frame
         bool stackstomp,        // add stack stomping code
         ubyte avx,              // use AVX instruction set (0, 1, 2)
-        bool betterC            // implement "Better C"
+        bool useModuleInfo,     // implement ModuleInfo
+        bool useTypeInfo,       // implement TypeInfo
+        bool useExceptions      // implement exception handling
         );
 
 void out_config_debug(
@@ -101,6 +106,7 @@ void backend_init()
              global.params.isOSX     ||
              global.params.isFreeBSD ||
              global.params.isOpenBSD ||
+             global.params.isDragonFlyBSD ||
              global.params.isSolaris)
     {
         exe = params.pic == 0;
@@ -117,7 +123,9 @@ void backend_init()
         params.alwaysframe,
         params.stackstomp,
         params.cpu >= CPU.avx2 ? 2 : params.cpu >= CPU.avx ? 1 : 0,
-        params.betterC
+        params.useModuleInfo && Module.moduleinfo,
+        params.useTypeInfo && Type.dtypeinfo,
+        params.useExceptions && ClassDeclaration.throwable
     );
 
     debug
@@ -186,8 +194,8 @@ extern (C) Symbol *symboldata(targ_size_t offset,tym_t ty)
     Symbol *s = symbol_generate(SClocstat, type_fake(ty));
     s.Sfl = FLdata;
     s.Soffset = offset;
-    s.Stype.Tmangle = mTYman_d; // writes symbol unmodified in Obj::mangle
-    symbol_keep(s);             // keep around
+    s.Stype.Tmangle = mTYman_sys; // writes symbol unmodified in Obj::mangle
+    symbol_keep(s);               // keep around
     return s;
 }
 

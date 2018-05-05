@@ -53,7 +53,7 @@ extern (C++) FuncDeclaration search_toString(StructDeclaration sd)
         static __gshared TypeFunction tftostring;
         if (!tftostring)
         {
-            tftostring = new TypeFunction(null, Type.tstring, 0, LINKd);
+            tftostring = new TypeFunction(null, Type.tstring, 0, LINK.d);
             tftostring = tftostring.merge().toTypeFunction();
         }
         fd = fd.overloadExactMatch(tftostring);
@@ -120,7 +120,7 @@ extern (C++) void semanticTypeInfo(Scope* sc, Type t)
             {
                 Scope scx;
                 scx._module = sd.getModule();
-                getTypeInfoType(t, &scx);
+                getTypeInfoType(sd.loc, t, &scx);
                 sd.requestTypeInfo = true;
             }
             else if (!sc.minst)
@@ -130,7 +130,7 @@ extern (C++) void semanticTypeInfo(Scope* sc, Type t)
             }
             else
             {
-                getTypeInfoType(t, sc);
+                getTypeInfoType(sd.loc, t, sc);
                 sd.requestTypeInfo = true;
 
                 // https://issues.dlang.org/show_bug.cgi?id=15149
@@ -150,7 +150,7 @@ extern (C++) void semanticTypeInfo(Scope* sc, Type t)
 
             // If the struct is in a non-root module, run semantic3 to get
             // correct symbols for the member function.
-            if (sd.semanticRun >= PASSsemantic3)
+            if (sd.semanticRun >= PASS.semantic3)
             {
                 // semantic3 is already done
             }
@@ -226,9 +226,10 @@ enum StructPOD : int
  */
 extern (C++) class StructDeclaration : AggregateDeclaration
 {
-    int zeroInit;               // !=0 if initialize with 0 fill
+    bool zeroInit;              // !=0 if initialize with 0 fill
     bool hasIdentityAssign;     // true if has identity opAssign
     bool hasIdentityEquals;     // true if has identity opEquals
+    bool hasNoFields;           // has no fields
     FuncDeclarations postblits; // Array of postblit functions
     FuncDeclaration postblit;   // aggregate postblit
 
@@ -250,10 +251,10 @@ extern (C++) class StructDeclaration : AggregateDeclaration
     // For those, today TypeInfo_Struct is generated in COMDAT.
     bool requestTypeInfo;
 
-    final extern (D) this(Loc loc, Identifier id, bool inObject)
+    extern (D) this(const ref Loc loc, Identifier id, bool inObject)
     {
         super(loc, id);
-        zeroInit = 0; // assume false until we do semantic processing
+        zeroInit = false; // assume false until we do semantic processing
         ispod = StructPOD.fwd;
         // For forward references
         type = new TypeStruct(this);
@@ -282,7 +283,7 @@ extern (C++) class StructDeclaration : AggregateDeclaration
     {
         if (xeq &&
             xeq._scope &&
-            xeq.semanticRun < PASSsemantic3done)
+            xeq.semanticRun < PASS.semantic3done)
         {
             uint errors = global.startGagging();
             xeq.semantic3(xeq._scope);
@@ -292,7 +293,7 @@ extern (C++) class StructDeclaration : AggregateDeclaration
 
         if (xcmp &&
             xcmp._scope &&
-            xcmp.semanticRun < PASSsemantic3done)
+            xcmp.semanticRun < PASS.semantic3done)
         {
             uint errors = global.startGagging();
             xcmp.semantic3(xcmp._scope);
@@ -303,34 +304,34 @@ extern (C++) class StructDeclaration : AggregateDeclaration
         FuncDeclaration ftostr = search_toString(this);
         if (ftostr &&
             ftostr._scope &&
-            ftostr.semanticRun < PASSsemantic3done)
+            ftostr.semanticRun < PASS.semantic3done)
         {
             ftostr.semantic3(ftostr._scope);
         }
 
         if (xhash &&
             xhash._scope &&
-            xhash.semanticRun < PASSsemantic3done)
+            xhash.semanticRun < PASS.semantic3done)
         {
             xhash.semantic3(xhash._scope);
         }
 
         if (postblit &&
             postblit._scope &&
-            postblit.semanticRun < PASSsemantic3done)
+            postblit.semanticRun < PASS.semantic3done)
         {
             postblit.semantic3(postblit._scope);
         }
 
         if (dtor &&
             dtor._scope &&
-            dtor.semanticRun < PASSsemantic3done)
+            dtor.semanticRun < PASS.semantic3done)
         {
             dtor.semantic3(dtor._scope);
         }
     }
 
-    override final Dsymbol search(Loc loc, Identifier ident, int flags = SearchLocalsOnly)
+    override final Dsymbol search(const ref Loc loc, Identifier ident, int flags = SearchLocalsOnly)
     {
         //printf("%s.StructDeclaration::search('%s', flags = x%x)\n", toChars(), ident.toChars(), flags);
         if (_scope && !symtab)
@@ -373,6 +374,7 @@ extern (C++) class StructDeclaration : AggregateDeclaration
         // 0 sized struct's are set to 1 byte
         if (structsize == 0)
         {
+            hasNoFields = true;
             structsize = 1;
             alignsize = 1;
         }
@@ -400,18 +402,18 @@ extern (C++) class StructDeclaration : AggregateDeclaration
         }
 
         // Determine if struct is all zeros or not
-        zeroInit = 1;
+        zeroInit = true;
         foreach (vd; fields)
         {
             if (vd._init)
             {
                 // Should examine init to see if it is really all 0's
-                zeroInit = 0;
+                zeroInit = false;
                 break;
             }
             else if (!vd.type.isZeroInit(loc))
             {
-                zeroInit = 0;
+                zeroInit = false;
                 break;
             }
         }
@@ -439,7 +441,7 @@ extern (C++) class StructDeclaration : AggregateDeclaration
      *      false if any errors occur,
      *      otherwise true and elements[] are rewritten for the output.
      */
-    final bool fit(Loc loc, Scope* sc, Expressions* elements, Type stype)
+    final bool fit(const ref Loc loc, Scope* sc, Expressions* elements, Type stype)
     {
         if (!elements)
             return true;
@@ -455,7 +457,7 @@ extern (C++) class StructDeclaration : AggregateDeclaration
             e = resolveProperties(sc, e);
             if (i >= nfields)
             {
-                if (i == fields.dim - 1 && isNested() && e.op == TOKnull)
+                if (i == fields.dim - 1 && isNested() && e.op == TOK.null_)
                 {
                     // CTFE sometimes creates null as hidden pointer; we'll allow this.
                     continue;
@@ -477,13 +479,26 @@ extern (C++) class StructDeclaration : AggregateDeclaration
             Type origType = t;
             Type tb = t.toBasetype();
 
+            const hasPointers = tb.hasPointers();
+            if (hasPointers)
+            {
+                if ((stype.alignment() < Target.ptrsize ||
+                     (v.offset & (Target.ptrsize - 1))) &&
+                    sc.func.setUnsafe())
+                {
+                    .error(loc, "field `%s.%s` cannot assign to misaligned pointers in `@safe` code",
+                        toChars(), v.toChars());
+                    return false;
+                }
+            }
+
             /* Look for case of initializing a static array with a too-short
              * string literal, such as:
              *  char[5] foo = "abc";
              * Allow this by doing an explicit cast, which will lengthen the string
              * literal.
              */
-            if (e.op == TOKstring && tb.ty == Tsarray)
+            if (e.op == TOK.string_ && tb.ty == Tsarray)
             {
                 StringExp se = cast(StringExp)e;
                 Type typeb = se.type.toBasetype();
@@ -511,7 +526,7 @@ extern (C++) class StructDeclaration : AggregateDeclaration
 
             e = e.implicitCastTo(sc, t);
         L1:
-            if (e.op == TOKerror)
+            if (e.op == TOK.error)
                 return false;
 
             (*elements)[i] = doCopyOrMove(sc, e);
@@ -586,7 +601,7 @@ extern (C++) class StructDeclaration : AggregateDeclaration
  */
 extern (C++) final class UnionDeclaration : StructDeclaration
 {
-    extern (D) this(Loc loc, Identifier id)
+    extern (D) this(const ref Loc loc, Identifier id)
     {
         super(loc, id, false);
     }

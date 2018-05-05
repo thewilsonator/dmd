@@ -45,6 +45,11 @@ static char __file__[] = __FILE__;      // for tassert.h
 #define DEST_LEN (IDMAX + IDOHD + 1)
 char *obj_mangle2(Symbol *s,char *dest);
 
+#if MARS
+// C++ name mangling is handled by front end
+#define cpp_mangle(s) ((s)->Sident)
+#endif
+
 /******************************************
  */
 
@@ -584,7 +589,7 @@ void build_syment_table(bool bigobj)
             aux.x_section.length = pseg->SDoffset;
 
         if (pseg->SDrel)
-            aux.x_section.NumberOfRelocations = pseg->SDrel->size() / sizeof(struct Relocation);
+            aux.x_section.NumberOfRelocations = (unsigned short)(pseg->SDrel->size() / sizeof(struct Relocation));
 
         if (psechdr->Characteristics & IMAGE_SCN_LNK_COMDAT)
         {
@@ -634,11 +639,15 @@ void build_syment_table(bool bigobj)
         switch (s->Sclass)
         {
             case SCstatic:
+                if (s->Sflags & SFLhidden)
+                    goto Ldefault;
+                // fall-through
             case SClocstat:
                 sym.StorageClass = IMAGE_SYM_CLASS_STATIC;
                 sym.Value = s->Soffset;
                 break;
 
+            Ldefault:
             default:
                 sym.StorageClass = IMAGE_SYM_CLASS_EXTERNAL;
                 if (sym.SectionNumber != IMAGE_SYM_UNDEFINED)
@@ -1734,7 +1743,6 @@ char *obj_mangle2(Symbol *s,char *dest)
             }
             // fall through
         case mTYman_cpp:
-        case mTYman_d:
         case mTYman_sys:
         case_mTYman_c64:
         case 0:
@@ -1744,6 +1752,7 @@ char *obj_mangle2(Symbol *s,char *dest)
             break;
 
         case mTYman_c:
+        case mTYman_d:
             if(I64)
                 goto case_mTYman_c64;
             // Prepend _ to identifier

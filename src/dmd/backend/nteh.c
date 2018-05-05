@@ -313,7 +313,7 @@ void nteh_prolog(CodeBuilder& cdb)
         /* An sindex value of -2 is a magic value that tells the
          * stack unwinder to skip this frame.
          */
-        assert(config.exe & (EX_LINUX | EX_LINUX64 | EX_OSX | EX_OSX64 | EX_FREEBSD | EX_FREEBSD64 | EX_SOLARIS | EX_SOLARIS64 | EX_OPENBSD | EX_OPENBSD64));
+        assert(config.exe & (EX_LINUX | EX_LINUX64 | EX_OSX | EX_OSX64 | EX_FREEBSD | EX_FREEBSD64 | EX_SOLARIS | EX_SOLARIS64 | EX_OPENBSD | EX_OPENBSD64 | EX_DRAGONFLYBSD64));
         cs.Iop = 0x68;
         cs.Iflags = 0;
         cs.Irex = 0;
@@ -666,7 +666,7 @@ void cdsetjmp(CodeBuilder& cdb, elem *e,regm_t *pretregs)
     stackpush += 4;
     cdb.genadjesp(4);
 
-    pushParams(cdb,e->E1,REGSIZE);
+    pushParams(cdb,e->E1,REGSIZE, TYnfunc);
 
     getregs(cdb,~getRtlsym(RTLSYM_SETJMP3)->Sregsaved & (ALLREGS | mES));
     cdb.gencs(0xE8,0,FLfunc,getRtlsym(RTLSYM_SETJMP3));      // CALL __setjmp3

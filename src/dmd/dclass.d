@@ -27,6 +27,7 @@ import dmd.globals;
 import dmd.id;
 import dmd.identifier;
 import dmd.mtype;
+import dmd.objc;
 import dmd.root.rmem;
 import dmd.target;
 import dmd.visitor;
@@ -243,6 +244,12 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
 
     /// set the progress of base classes resolving
     Baseok baseok;
+
+    /**
+     * Data for a class declaration that is needed for the Objective-C
+     * integration.
+     */
+    ObjcClassDeclaration objc;
 
     Symbol* cpp_type_info_ptr_sym;      // cached instance of class Id.cpp_type_info_ptr
 
@@ -493,10 +500,10 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
         {
             /* cd.baseClass might not be set if cd is forward referenced.
              */
-            if (!cd.baseClass && cd.semanticRun < PASSsemanticdone && !cd.isInterfaceDeclaration())
+            if (!cd.baseClass && cd.semanticRun < PASS.semanticdone && !cd.isInterfaceDeclaration())
             {
                 cd.dsymbolSemantic(null);
-                if (!cd.baseClass && cd.semanticRun < PASSsemanticdone)
+                if (!cd.baseClass && cd.semanticRun < PASS.semanticdone)
                     cd.error("base class is forward referenced by `%s`", toChars());
             }
 
@@ -517,7 +524,7 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
         return baseok >= Baseok.done;
     }
 
-    override final Dsymbol search(Loc loc, Identifier ident, int flags = SearchLocalsOnly)
+    override final Dsymbol search(const ref Loc loc, Identifier ident, int flags = SearchLocalsOnly)
     {
         //printf("%s.ClassDeclaration.search('%s', flags=x%x)\n", toChars(), ident.toChars(), flags);
         //if (_scope) printf("%s baseok = %d\n", toChars(), baseok);
@@ -714,7 +721,7 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
     final bool isFuncHidden(FuncDeclaration fd)
     {
         //printf("ClassDeclaration.isFuncHidden(class = %s, fd = %s)\n", toChars(), fd.toPrettyChars());
-        Dsymbol s = search(Loc(), fd.ident, IgnoreAmbiguous | IgnoreErrors);
+        Dsymbol s = search(Loc.initial, fd.ident, IgnoreAmbiguous | IgnoreErrors);
         if (!s)
         {
             //printf("not found\n");
@@ -915,9 +922,9 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
         this.dsymbolSemantic(null);
 
         /* The next line should work, but does not because when ClassDeclaration.dsymbolSemantic()
-         * is called recursively it can set PASSsemanticdone without finishing it.
+         * is called recursively it can set PASS.semanticdone without finishing it.
          */
-        //if (semanticRun < PASSsemanticdone)
+        //if (semanticRun < PASS.semanticdone)
         {
             /* Could not complete semantic(). Try running semantic() on
              * each of the virtual functions,
@@ -1022,11 +1029,11 @@ extern (C++) final class InterfaceDeclaration : ClassDeclaration
     {
         auto sc2 = super.newScope(sc);
         if (com)
-            sc2.linkage = LINKwindows;
+            sc2.linkage = LINK.windows;
         else if (classKind == ClassKind.cpp)
-            sc2.linkage = LINKcpp;
+            sc2.linkage = LINK.cpp;
         else if (classKind == ClassKind.objc)
-            sc2.linkage = LINKobjc;
+            sc2.linkage = LINK.objc;
         return sc2;
     }
 
@@ -1044,7 +1051,7 @@ extern (C++) final class InterfaceDeclaration : ClassDeclaration
     {
         //printf("%s.InterfaceDeclaration.isBaseOf(cd = '%s')\n", toChars(), cd.toChars());
         assert(!baseClass);
-        foreach (j, b; cd.interfaces)
+        foreach (b; cd.interfaces)
         {
             //printf("\tX base %s\n", b.sym.toChars());
             if (this == b.sym)

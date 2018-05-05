@@ -14,6 +14,7 @@ module dmd.traits;
 
 import core.stdc.stdio;
 import core.stdc.string;
+
 import dmd.aggregate;
 import dmd.arraytypes;
 import dmd.canthrow;
@@ -36,6 +37,7 @@ import dmd.nogc;
 import dmd.root.array;
 import dmd.root.speller;
 import dmd.root.stringtable;
+import dmd.target;
 import dmd.tokens;
 import dmd.typesem;
 import dmd.visitor;
@@ -53,7 +55,7 @@ struct PushAttributes
     extern (C++) static int fp(void* param, const(char)* str)
     {
         PushAttributes* p = cast(PushAttributes*)param;
-        p.mods.push(new StringExp(Loc(), cast(char*)str));
+        p.mods.push(new StringExp(Loc.initial, cast(char*)str));
         return 0;
     }
 }
@@ -82,9 +84,9 @@ private Dsymbol getDsymbolWithoutExpCtx(RootObject oarg)
 {
     if (auto e = isExpression(oarg))
     {
-        if (e.op == TOKdotvar)
+        if (e.op == TOK.dotVariable)
             return (cast(DotVarExp)e).var;
-        if (e.op == TOKdottd)
+        if (e.op == TOK.dotTemplateDeclaration)
             return (cast(DotTemplateExp)e).td;
     }
     return getDsymbol(oarg);
@@ -99,6 +101,7 @@ shared static this()
         "isAbstractClass",
         "isArithmetic",
         "isAssociativeArray",
+        "isDisabled",
         "isDeprecated",
         "isFuture",
         "isFinalClass",
@@ -118,6 +121,7 @@ shared static this()
         "isRef",
         "isOut",
         "isLazy",
+        "isReturnOnStack",
         "hasMember",
         "identifier",
         "getProtection",
@@ -433,17 +437,59 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         return new ErrorExp();
     }
 
-    Expression True()
+    IntegerExp True()
     {
         return new IntegerExp(e.loc, true, Type.tbool);
     }
 
-    Expression False()
+    IntegerExp False()
     {
         return new IntegerExp(e.loc, false, Type.tbool);
     }
 
-    Expression isX(T)(bool function(T) fp)
+    /********
+     * Gets the function type from a given AST node
+     * if the node is a function of some sort.
+     * Params:
+     *   o = an AST node to check for a `TypeFunction`
+     *   fdp = if `o` is a FuncDeclaration then fdp is set to that, otherwise `null`
+     * Returns:
+     *   a type node if `o` is a declaration of
+     *   a delegate, function, function-pointer or a variable of the former.
+     *   Otherwise, `null`.
+     */
+    static TypeFunction toTypeFunction(RootObject o, out FuncDeclaration fdp)
+    {
+        Type t;
+        if (auto s = getDsymbolWithoutExpCtx(o))
+        {
+            if (auto fd = s.isFuncDeclaration())
+            {
+                t = fd.type;
+                fdp = fd;
+            }
+            else if (auto vd = s.isVarDeclaration())
+                t = vd.type;
+            else
+                t = isType(o);
+        }
+        else
+            t = isType(o);
+
+        if (t)
+        {
+            if (t.ty == Tfunction)
+                return cast(TypeFunction)t;
+            else if (t.ty == Tdelegate)
+                return cast(TypeFunction)t.nextOf();
+            else if (t.ty == Tpointer && t.nextOf().ty == Tfunction)
+                return cast(TypeFunction)t.nextOf();
+        }
+
+        return null;
+    }
+
+    IntegerExp isX(T)(bool function(T) fp)
     {
         if (!dim)
             return False();
@@ -504,7 +550,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
     {
         if (global.params.vcomplex)
         {
-            if (isTypeX(t => t.iscomplex() || t.isimaginary()))
+            if (isTypeX(t => t.iscomplex() || t.isimaginary()).isBool(true))
                 return True();
         }
         return isDsymX(t => t.isDeprecated());
@@ -582,6 +628,13 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
 
         e.error("aggregate or function expected instead of `%s`", o.toChars());
         return new ErrorExp();
+    }
+    if (e.ident == Id.isDisabled)
+    {
+        if (dim != 1)
+            return dimError(1);
+
+        return isFuncX(f => f.isDisabled());
     }
     if (e.ident == Id.isAbstractFunction)
     {
@@ -699,7 +752,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
                 e.error("argument `%s` has no protection", o.toChars());
             return new ErrorExp();
         }
-        if (s.semanticRun == PASSinit)
+        if (s.semanticRun == PASS.init)
             s.dsymbolSemantic(null);
 
         auto protName = protectionToChars(s.prot().kind); // TODO: How about package(names)
@@ -835,7 +888,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         }
         else if (e.ident == Id.getMember)
         {
-            if (ex.op == TOKdotid)
+            if (ex.op == TOK.dotIdentifier)
                 // Prevent semantic() from replacing Symbol with its initializer
                 (cast(DotIdExp)ex).wantsym = true;
             ex = ex.expressionSemantic(scx);
@@ -856,23 +909,49 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
              */
             auto exps = new Expressions();
             FuncDeclaration f;
-            if (ex.op == TOKvar)
+            if (ex.op == TOK.variable)
             {
                 VarExp ve = cast(VarExp)ex;
                 f = ve.var.isFuncDeclaration();
                 ex = null;
             }
-            else if (ex.op == TOKdotvar)
+            else if (ex.op == TOK.dotVariable)
             {
                 DotVarExp dve = cast(DotVarExp)ex;
                 f = dve.var.isFuncDeclaration();
-                if (dve.e1.op == TOKdottype || dve.e1.op == TOKthis)
+                if (dve.e1.op == TOK.dotType || dve.e1.op == TOK.this_)
                     ex = null;
                 else
                     ex = dve.e1;
             }
 
-            overloadApply(f, (Dsymbol s)
+            bool[string] funcTypeHash;
+
+            /* Compute the function signature and insert it in the
+             * hashtable, if not present. This is needed so that
+             * traits(getOverlods, F3, "visit") does not count `int visit(int)`
+             * twice in the following example:
+             *
+             * =============================================
+             * interface F1 { int visit(int);}
+             * interface F2 { int visit(int); void visit(); }
+             * interface F3 : F2, F1 {}
+             *==============================================
+             */
+            void insertInterfaceInheritedFunction(FuncDeclaration fd, Expression e)
+            {
+                auto funcType = fd.type.toChars();
+                auto len = strlen(funcType);
+                string signature = funcType[0 .. len].idup;
+                //printf("%s - %s\n", fd.toChars, signature);
+                if (signature !in funcTypeHash)
+                {
+                    funcTypeHash[signature] = true;
+                    exps.push(e);
+                }
+            }
+
+            int dg(Dsymbol s)
             {
                 auto fd = s.isFuncDeclaration();
                 if (!fd)
@@ -885,12 +964,35 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
                 auto fa = new FuncAliasDeclaration(fd.ident, fd, false);
                 fa.protection = fd.protection;
 
-                auto e = ex ? new DotVarExp(Loc(), ex, fa, false)
-                            : new DsymbolExp(Loc(), fa, false);
+                auto e = ex ? new DotVarExp(Loc.initial, ex, fa, false)
+                            : new DsymbolExp(Loc.initial, fa, false);
 
-                exps.push(e);
+                // if the parent is an interface declaration
+                // we must check for functions with the same signature
+                // in different inherited interfaces
+                if (sym.isInterfaceDeclaration())
+                    insertInterfaceInheritedFunction(fd, e);
+                else
+                    exps.push(e);
                 return 0;
-            });
+            }
+
+            InterfaceDeclaration ifd = null;
+            if (sym)
+                ifd = sym.isInterfaceDeclaration();
+            // If the symbol passed as a parameter is an
+            // interface that inherits other interfaces
+            if (ifd && ifd.interfaces)
+            {
+                // check the overloads of each inherited interface individually
+                foreach (bc; ifd.interfaces)
+                {
+                    if (auto fd = bc.sym.search(e.loc, f.ident))
+                        overloadApply(fd, &dg);
+                }
+            }
+            else
+                overloadApply(f, &dg);
 
             auto tup = new TupleExp(e.loc, exps);
             return tup.expressionSemantic(scx);
@@ -978,30 +1080,15 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
     }
     if (e.ident == Id.getFunctionAttributes)
     {
-        // extract all function attributes as a tuple (const/shared/inout/pure/nothrow/etc) except UDAs.
+        /* Extract all function attributes as a tuple (const/shared/inout/pure/nothrow/etc) except UDAs.
+         * https://dlang.org/spec/traits.html#getFunctionAttributes
+         */
         if (dim != 1)
             return dimError(1);
 
-        auto o = (*e.args)[0];
-        auto s = getDsymbolWithoutExpCtx(o);
-        auto t = isType(o);
-        TypeFunction tf = null;
-        if (s)
-        {
-            if (auto fd = s.isFuncDeclaration())
-                t = fd.type;
-            else if (auto vd = s.isVarDeclaration())
-                t = vd.type;
-        }
-        if (t)
-        {
-            if (t.ty == Tfunction)
-                tf = cast(TypeFunction)t;
-            else if (t.ty == Tdelegate)
-                tf = cast(TypeFunction)t.nextOf();
-            else if (t.ty == Tpointer && t.nextOf().ty == Tfunction)
-                tf = cast(TypeFunction)t.nextOf();
-        }
+        FuncDeclaration fd;
+        TypeFunction tf = toTypeFunction((*e.args)[0], fd);
+
         if (!tf)
         {
             e.error("first argument is not a function");
@@ -1016,6 +1103,27 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
 
         auto tup = new TupleExp(e.loc, mods);
         return tup.expressionSemantic(sc);
+    }
+    if (e.ident == Id.isReturnOnStack)
+    {
+        /* Extract as a boolean if function return value is on the stack
+         * https://dlang.org/spec/traits.html#isReturnOnStack
+         */
+        if (dim != 1)
+            return dimError(1);
+
+        RootObject o = (*e.args)[0];
+        FuncDeclaration fd;
+        TypeFunction tf = toTypeFunction(o, fd);
+
+        if (!tf)
+        {
+            e.error("argument to `__traits(isReturnOnStack, %s)` is not a function", o.toChars());
+            return new ErrorExp();
+        }
+
+        bool value = Target.isReturnOnStack(tf);
+        return new IntegerExp(e.loc, value, Type.tbool);
     }
     if (e.ident == Id.getFunctionVariadicStyle)
     {
@@ -1032,17 +1140,10 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         LINK link;
         int varargs;
         auto o = (*e.args)[0];
-        auto t = isType(o);
-        TypeFunction tf = null;
-        if (t)
-        {
-            if (t.ty == Tfunction)
-                tf = cast(TypeFunction)t;
-            else if (t.ty == Tdelegate)
-                tf = cast(TypeFunction)t.nextOf();
-            else if (t.ty == Tpointer && t.nextOf().ty == Tfunction)
-                tf = cast(TypeFunction)t.nextOf();
-        }
+
+        FuncDeclaration fd;
+        TypeFunction tf = toTypeFunction(o, fd);
+
         if (tf)
         {
             link = tf.linkage;
@@ -1050,9 +1151,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         }
         else
         {
-            auto s = getDsymbol(o);
-            FuncDeclaration fd;
-            if (!s || (fd = s.isFuncDeclaration()) is null)
+            if (!fd)
             {
                 e.error("argument to `__traits(getFunctionVariadicStyle, %s)` is not a function", o.toChars());
                 return new ErrorExp();
@@ -1082,19 +1181,12 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         if (dim != 2)
             return dimError(2);
 
-        auto o1 = (*e.args)[1];
         auto o = (*e.args)[0];
-        auto t = isType(o);
-        TypeFunction tf = null;
-        if (t)
-        {
-            if (t.ty == Tfunction)
-                tf = cast(TypeFunction)t;
-            else if (t.ty == Tdelegate)
-                tf = cast(TypeFunction)t.nextOf();
-            else if (t.ty == Tpointer && t.nextOf().ty == Tfunction)
-                tf = cast(TypeFunction)t.nextOf();
-        }
+        auto o1 = (*e.args)[1];
+
+        FuncDeclaration fd;
+        TypeFunction tf = toTypeFunction(o, fd);
+
         Parameters* fparams;
         if (tf)
         {
@@ -1102,9 +1194,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         }
         else
         {
-            auto s = getDsymbol(o);
-            FuncDeclaration fd;
-            if (!s || (fd = s.isFuncDeclaration()) is null)
+            if (!fd)
             {
                 e.error("first argument to `__traits(getParameterStorageClasses, %s, %s)` is not a function",
                     o.toChars(), o1.toChars());
@@ -1136,7 +1226,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         stc = p.storageClass;
 
         // This mirrors hdrgen.visit(Parameter p)
-        if (p.type && p.type.mod & MODshared)
+        if (p.type && p.type.mod & MODFlags.shared_)
             stc &= ~STC.shared_;
 
         auto exps = new Expressions;
@@ -1184,17 +1274,10 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
 
         LINK link;
         auto o = (*e.args)[0];
-        auto t = isType(o);
-        TypeFunction tf = null;
-        if (t)
-        {
-            if (t.ty == Tfunction)
-                tf = cast(TypeFunction)t;
-            else if (t.ty == Tdelegate)
-                tf = cast(TypeFunction)t.nextOf();
-            else if (t.ty == Tpointer && t.nextOf().ty == Tfunction)
-                tf = cast(TypeFunction)t.nextOf();
-        }
+
+        FuncDeclaration fd;
+        TypeFunction tf = toTypeFunction(o, fd);
+
         if (tf)
             link = tf.linkage;
         else
@@ -1302,7 +1385,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         auto cd = sds.isClassDeclaration();
         if (cd && e.ident == Id.allMembers)
         {
-            if (cd.semanticRun < PASSsemanticdone)
+            if (cd.semanticRun < PASS.semanticdone)
                 cd.dsymbolSemantic(null); // https://issues.dlang.org/show_bug.cgi?id=13668
                                    // Try to resolve forward reference
 
@@ -1382,16 +1465,14 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
                     err |= tf.isnothrow && canThrow(ex, sc2.func, false);
                 }
                 ex = checkGC(sc2, ex);
-                if (ex.op == TOKerror)
+                if (ex.op == TOK.error)
                     err = true;
             }
 
             // Carefully detach the scope from the parent and throw it away as
             // we only need it to evaluate the expression
             // https://issues.dlang.org/show_bug.cgi?id=15428
-            sc2.freeFieldinit();
-            sc2.enclosing = null;
-            sc2.pop();
+            sc2.detach();
 
             if (global.endGagging(errors) || err)
             {
@@ -1410,8 +1491,45 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         if (!TemplateInstance.semanticTiargs(e.loc, sc, e.args, 0))
             return new ErrorExp();
 
+
         auto o1 = (*e.args)[0];
         auto o2 = (*e.args)[1];
+
+        static FuncLiteralDeclaration isLambda(RootObject oarg)
+        {
+            if (auto t = isDsymbol(oarg))
+            {
+                if (auto td = t.isTemplateDeclaration())
+                {
+                    if (td.members && td.members.dim == 1)
+                    {
+                        if (auto fd = (*td.members)[0].isFuncLiteralDeclaration())
+                            return fd;
+                    }
+                }
+            }
+            else if (auto ea = isExpression(oarg))
+            {
+                if (ea.op == TOK.function_)
+                {
+                    if (auto fe = cast(FuncExp)ea)
+                        return fe.fd;
+                }
+            }
+
+            return null;
+        }
+
+        auto l1 = isLambda(o1);
+        auto l2 = isLambda(o2);
+
+        if (l1 && l2)
+        {
+            import dmd.lambdacomp : isSameFuncLiteral;
+            if (isSameFuncLiteral(l1, l2, sc))
+                return True();
+        }
+
         auto s1 = getDsymbol(o1);
         auto s2 = getDsymbol(o2);
         //printf("isSame: %s, %s\n", o1.toChars(), o2.toChars());
@@ -1442,6 +1560,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         }
         if (!s1 || !s2)
             return False();
+
         s1 = s1.toAlias();
         s2 = s2.toAlias();
 
@@ -1511,7 +1630,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
                         auto ad = new FuncAliasDeclaration(ud.ident, ud, false);
                         ad.protection = ud.protection;
 
-                        auto e = new DsymbolExp(Loc(), ad, false);
+                        auto e = new DsymbolExp(Loc.initial, ad, false);
                         exps.push(e);
 
                         uniqueUnitTests[cast(void*)ud] = true;

@@ -14,6 +14,7 @@ module dmd.declaration;
 
 import dmd.aggregate;
 import dmd.arraytypes;
+import dmd.ctorflow;
 import dmd.dclass;
 import dmd.delegatize;
 import dmd.dscope;
@@ -88,20 +89,20 @@ private int modifyFieldVar(Loc loc, Scope* sc, VarDeclaration var, Expression e1
             ((fd.isCtorDeclaration() && var.isField()) ||
              (fd.isStaticCtorDeclaration() && !var.isField())) &&
             fd.toParent2() == var.toParent2() &&
-            (!e1 || e1.op == TOKthis))
+            (!e1 || e1.op == TOK.this_))
         {
             bool result = true;
 
             var.ctorinit = true;
             //printf("setting ctorinit\n");
 
-            if (var.isField() && sc.fieldinit && !sc.intypeof)
+            if (var.isField() && sc.ctorflow.fieldinit.length && !sc.intypeof)
             {
                 assert(e1);
                 auto mustInit = ((var.storage_class & STC.nodefaultctor) != 0 ||
                                  var.type.needsNested());
 
-                auto dim = sc.fieldinit_dim;
+                const dim = sc.ctorflow.fieldinit.length;
                 auto ad = fd.isMember2();
                 assert(ad);
                 size_t i;
@@ -111,7 +112,7 @@ private int modifyFieldVar(Loc loc, Scope* sc, VarDeclaration var, Expression e1
                         break;
                 }
                 assert(i < dim);
-                uint fi = sc.fieldinit[i];
+                const fi = sc.ctorflow.fieldinit[i];
 
                 if (fi & CSX.this_ctor)
                 {
@@ -120,10 +121,18 @@ private int modifyFieldVar(Loc loc, Scope* sc, VarDeclaration var, Expression e1
                     else
                     {
                         const(char)* modStr = !var.type.isMutable() ? MODtoChars(var.type.mod) : MODtoChars(e1.type.mod);
-                        .error(loc, "%s field `%s` initialized multiple times", modStr, var.toChars());
+                        // Deprecated in 2018-04.
+                        // Change to error in 2019-04 by deleting the following
+                        // if-branch and the deprecate_18719 enum member in the
+                        // dmd.ctorflow.CSX enum.
+                        // @@@DEPRECATED_2019-01@@@.
+                        if (fi & CSX.deprecate_18719)
+                            .deprecation(loc, "%s field `%s` initialized multiple times", modStr, var.toChars());
+                        else
+                            .error(loc, "%s field `%s` initialized multiple times", modStr, var.toChars());
                     }
                 }
-                else if (sc.noctor || (fi & CSX.label))
+                else if (sc.inLoop || (fi & CSX.label))
                 {
                     if (!mustInit && var.type.isMutable() && e1.type.isMutable())
                         result = false;
@@ -134,7 +143,7 @@ private int modifyFieldVar(Loc loc, Scope* sc, VarDeclaration var, Expression e1
                     }
                 }
 
-                sc.fieldinit[i] |= CSX.this_ctor;
+                sc.ctorflow.fieldinit[i] |= CSX.this_ctor;
                 if (var.overlapped) // https://issues.dlang.org/show_bug.cgi?id=15258
                 {
                     foreach (j, v; ad.fields)
@@ -142,7 +151,7 @@ private int modifyFieldVar(Loc loc, Scope* sc, VarDeclaration var, Expression e1
                         if (v is var || !var.isOverlappedWith(v))
                             continue;
                         v.ctorinit = true;
-                        sc.fieldinit[j] = CSX.this_ctor;
+                        sc.ctorflow.fieldinit[j] = CSX.this_ctor;
                     }
                 }
             }
@@ -182,7 +191,7 @@ private int modifyFieldVar(Loc loc, Scope* sc, VarDeclaration var, Expression e1
  */
 extern (C++) void ObjectNotFound(Identifier id)
 {
-    Type.error(Loc(), "`%s` not found. object.d may be incorrectly installed or corrupt.", id.toChars());
+    Type.error(Loc.initial, "`%s` not found. object.d may be incorrectly installed or corrupt.", id.toChars());
     fatal();
 }
 
@@ -280,7 +289,7 @@ extern (C++) abstract class Declaration : Dsymbol
         super(id);
         storage_class = STC.undefined_;
         protection = Prot(Prot.Kind.undefined);
-        linkage = LINKdefault;
+        linkage = LINK.default_;
     }
 
     override const(char)* kind() const
@@ -288,7 +297,7 @@ extern (C++) abstract class Declaration : Dsymbol
         return "declaration";
     }
 
-    override final d_uns64 size(Loc loc)
+    override final d_uns64 size(const ref Loc loc)
     {
         assert(type);
         return type.size();
@@ -344,7 +353,7 @@ extern (C++) abstract class Declaration : Dsymbol
      * Check to see if declaration can be modified in this context (sc).
      * Issue error if not.
      */
-    final int checkModify(Loc loc, Scope* sc, Type t, Expression e1, int flag)
+    final int checkModify(Loc loc, Scope* sc, Expression e1, int flag)
     {
         VarDeclaration v = isVarDeclaration();
         if (v && v.canassign)
@@ -364,7 +373,7 @@ extern (C++) abstract class Declaration : Dsymbol
             }
         }
 
-        if (e1 && e1.op == TOKthis && isField())
+        if (e1 && e1.op == TOK.this_ && isField())
         {
             VarDeclaration vthis = (cast(ThisExp)e1).var;
             for (Scope* scx = sc; scx; scx = scx.enclosing)
@@ -388,7 +397,7 @@ extern (C++) abstract class Declaration : Dsymbol
         return 1;
     }
 
-    override final Dsymbol search(Loc loc, Identifier ident, int flags = SearchLocalsOnly)
+    override final Dsymbol search(const ref Loc loc, Identifier ident, int flags = SearchLocalsOnly)
     {
         Dsymbol s = Dsymbol.search(loc, ident, flags);
         if (!s && type)
@@ -475,9 +484,14 @@ extern (C++) abstract class Declaration : Dsymbol
         return (storage_class & STC.parameter) != 0;
     }
 
-    override final bool isDeprecated() const pure nothrow @nogc @safe
+    override final bool isDeprecated() pure nothrow @nogc @safe
     {
         return (storage_class & STC.deprecated_) != 0;
+    }
+
+    final bool isDisabled() const pure nothrow @nogc @safe
+    {
+        return (storage_class & STC.disable) != 0;
     }
 
     final bool isOverride() const pure nothrow @nogc @safe
@@ -608,7 +622,7 @@ extern (C++) final class TupleDeclaration : Declaration
 
             tupletype = new TypeTuple(args);
             if (hasdeco)
-                return tupletype.typeSemantic(Loc(), null);
+                return tupletype.typeSemantic(Loc.initial, null);
         }
         return tupletype;
     }
@@ -637,7 +651,7 @@ extern (C++) final class TupleDeclaration : Declaration
             if (o.dyncast() == DYNCAST.expression)
             {
                 Expression e = cast(Expression)o;
-                if (e.op == TOKdsymbol)
+                if (e.op == TOK.dSymbol)
                 {
                     DsymbolExp ve = cast(DsymbolExp)e;
                     Declaration d = ve.s.isDeclaration();
@@ -725,7 +739,7 @@ extern (C++) final class AliasDeclaration : Declaration
          *  simple Overload class (an array) and then later have that resolve
          *  all collisions.
          */
-        if (semanticRun >= PASSsemanticdone)
+        if (semanticRun >= PASS.semanticdone)
         {
             /* Semantic analysis is already finished, and the aliased entity
              * is not overloadable.
@@ -863,7 +877,7 @@ extern (C++) final class AliasDeclaration : Declaration
             return aliassym;
         }
 
-        if (semanticRun >= PASSsemanticdone)
+        if (semanticRun >= PASS.semanticdone)
         {
             // semantic is already done.
 
@@ -909,7 +923,7 @@ extern (C++) final class AliasDeclaration : Declaration
     override bool isOverloadable()
     {
         // assume overloadable until alias is resolved
-        return semanticRun < PASSsemanticdone ||
+        return semanticRun < PASS.semanticdone ||
             aliassym && aliassym.isOverloadable();
     }
 
@@ -1119,7 +1133,7 @@ extern (C++) class VarDeclaration : Declaration
                 RootObject o = (*v2.objects)[i];
                 assert(o.dyncast() == DYNCAST.expression);
                 Expression e = cast(Expression)o;
-                assert(e.op == TOKdsymbol);
+                assert(e.op == TOK.dSymbol);
                 DsymbolExp se = cast(DsymbolExp)e;
                 se.s.setFieldOffset(ad, poffset, isunion);
             }
@@ -1197,21 +1211,22 @@ extern (C++) class VarDeclaration : Declaration
         return "variable";
     }
 
-    override final AggregateDeclaration isThis()
+    override final inout(AggregateDeclaration) isThis() inout
     {
-        AggregateDeclaration ad = null;
         if (!(storage_class & (STC.static_ | STC.extern_ | STC.manifest | STC.templateparameter | STC.tls | STC.gshared | STC.ctfe)))
         {
-            for (Dsymbol s = this; s; s = s.parent)
+            /* The casting is necessary because `s = s.parent` is otherwise rejected
+             */
+            for (auto s = cast(Dsymbol)this; s; s = s.parent)
             {
-                ad = s.isMember();
+                auto ad = (cast(inout)s).isMember();
                 if (ad)
-                    break;
+                    return ad;
                 if (!s.parent || !s.parent.isTemplateMixin())
                     break;
             }
         }
-        return ad;
+        return null;
     }
 
     override final bool needThis()
@@ -1536,7 +1551,7 @@ extern (C++) class VarDeclaration : Declaration
 
         //printf("\tfdv = %s\n", fdv.toChars());
         //printf("\tfdthis = %s\n", fdthis.toChars());
-        if (loc.filename)
+        if (loc.isValid())
         {
             int lv = fdthis.getLevel(loc, sc, fdv);
             if (lv == -2) // error
@@ -1544,16 +1559,21 @@ extern (C++) class VarDeclaration : Declaration
         }
 
         // Add this to fdv.closureVars[] if not already there
-        for (size_t i = 0; 1; i++)
+        if (!sc.intypeof && !(sc.flags & SCOPE.compile) &&
+            // https://issues.dlang.org/show_bug.cgi?id=17605
+            (fdv.flags & FUNCFLAG.compileTimeOnly || !(fdthis.flags & FUNCFLAG.compileTimeOnly))
+           )
         {
-            if (i == fdv.closureVars.dim)
+            for (size_t i = 0; 1; i++)
             {
-                if (!sc.intypeof && !(sc.flags & SCOPE.compile))
+                if (i == fdv.closureVars.dim)
+                {
                     fdv.closureVars.push(this);
-                break;
+                    break;
+                }
+                if (fdv.closureVars[i] == this)
+                    break;
             }
-            if (fdv.closureVars[i] == this)
-                break;
         }
 
         //printf("fdthis is %s\n", fdthis.toChars());
@@ -1570,7 +1590,7 @@ extern (C++) class VarDeclaration : Declaration
             ExpInitializer ez = _init.isExpInitializer();
             assert(ez);
             Expression e = ez.exp;
-            if (e.op == TOKconstruct || e.op == TOKblit)
+            if (e.op == TOK.construct || e.op == TOK.blit)
                 e = (cast(AssignExp)e).e2;
             return lambdaCheckForNestedRef(e, sc);
         }
@@ -1649,11 +1669,11 @@ extern (C++) class TypeInfoDeclaration : VarDeclaration
 
     final extern (D) this(Type tinfo)
     {
-        super(Loc(), Type.dtypeinfo.type, tinfo.getTypeInfoIdent(), null);
+        super(Loc.initial, Type.dtypeinfo.type, tinfo.getTypeInfoIdent(), null);
         this.tinfo = tinfo;
         storage_class = STC.static_ | STC.gshared;
         protection = Prot(Prot.Kind.public_);
-        linkage = LINKc;
+        linkage = LINK.c;
         alignment = Target.ptrsize;
     }
 

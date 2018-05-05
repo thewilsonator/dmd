@@ -49,7 +49,6 @@ const(char)* toCppMangleItanium(Dsymbol s)
 {
     //printf("toCppMangleItanium(%s)\n", s.toChars());
     OutBuffer buf;
-    Target.prefixName(&buf, LINKcpp);
     scope CppMangleVisitor v = new CppMangleVisitor(&buf, s.loc);
     v.mangleOf(s);
     return buf.extractString();
@@ -223,7 +222,7 @@ private final class CppMangleVisitor : Visitor
                 {
                     bool is_nested = d.toParent() &&
                         !d.toParent().isModule() &&
-                        (cast(TypeFunction)d.isFuncDeclaration().type).linkage == LINKcpp;
+                        (cast(TypeFunction)d.isFuncDeclaration().type).linkage == LINK.cpp;
                     if (is_nested)
                         buf.writeByte('X');
                     buf.writeByte('L');
@@ -232,7 +231,7 @@ private final class CppMangleVisitor : Visitor
                     if (is_nested)
                         buf.writeByte('E');
                 }
-                else if (e && e.op == TOKvar && (cast(VarExp)e).var.isVarDeclaration())
+                else if (e && e.op == TOK.variable && (cast(VarExp)e).var.isVarDeclaration())
                 {
                     VarDeclaration vd = (cast(VarExp)e).var.isVarDeclaration();
                     buf.writeByte('L');
@@ -585,13 +584,26 @@ private final class CppMangleVisitor : Visitor
              */
             TemplateInstance ti = d.parent.isTemplateInstance();
             assert(ti);
-            source_name(ti);
+            Dsymbol p = ti.toParent();
+            if (p && !p.isModule() && tf.linkage == LINK.cpp)
+            {
+                buf.writeByte('N');
+                CV_qualifiers(d.type);
+                prefix_name(p);
+                if (d.isDtorDeclaration())
+                    buf.writestring("D1");
+                else
+                    source_name(ti);
+                buf.writeByte('E');
+            }
+            else
+                source_name(ti);
             headOfType(tf.nextOf());  // mangle return type
         }
         else
         {
             Dsymbol p = d.toParent();
-            if (p && !p.isModule() && tf.linkage == LINKcpp)
+            if (p && !p.isModule() && tf.linkage == LINK.cpp)
             {
                 /* <nested-name> ::= N [<CV-qualifiers>] <prefix> <unqualified-name> E
                  *               ::= N [<CV-qualifiers>] <template-prefix> <template-args> E
@@ -625,7 +637,7 @@ private final class CppMangleVisitor : Visitor
             }
         }
 
-        if (tf.linkage == LINKcpp) //Template args accept extern "C" symbols with special mangling
+        if (tf.linkage == LINK.cpp) //Template args accept extern "C" symbols with special mangling
         {
             assert(tf.ty == Tfunction);
             mangleFunctionParameters(tf.parameters, tf.varargs);
@@ -638,29 +650,7 @@ private final class CppMangleVisitor : Visitor
 
         int paramsCppMangleDg(size_t n, Parameter fparam)
         {
-            Type t = fparam.type.merge2();
-            if (fparam.storageClass & (STC.out_ | STC.ref_))
-                t = t.referenceTo();
-            else if (fparam.storageClass & STC.lazy_)
-            {
-                // Mangle as delegate
-                Type td = new TypeFunction(null, t, 0, LINKd);
-                td = new TypeDelegate(td);
-                t = merge(t);
-            }
-            static if (IN_GCC)
-            {
-                // Could be a va_list, which we mangle as a pointer.
-                if (t.ty == Tsarray && Type.tvalist.ty == Tsarray)
-                {
-                    Type tb = t.toBasetype().mutableOf();
-                    if (tb == Type.tvalist)
-                    {
-                        tb = t.nextOf().pointerTo();
-                        t = tb.castMod(t.mod);
-                    }
-                }
-            }
+            Type t = Target.cppParameterType(fparam);
             if (t.ty == Tsarray)
             {
                 // Static arrays in D are passed by value; no counterpart in C++
@@ -950,7 +940,7 @@ public:
         if (substitute(t))
             return;
         buf.writeByte('F');
-        if (t.linkage == LINKc)
+        if (t.linkage == LINK.c)
             buf.writeByte('Y');
         Type tn = t.next;
         if (t.isref)
@@ -983,6 +973,15 @@ public:
     {
         if (t.isImmutable() || t.isShared())
             return error(t);
+
+        /* __c_long and __c_ulong get special mangling
+         */
+        const id = t.sym.ident;
+        //printf("struct id = '%s'\n", id.toChars());
+        if (id == Id.__c_long)
+            return writeBasicType(t, 0, 'l');
+        else if (id == Id.__c_ulong)
+            return writeBasicType(t, 0, 'm');
 
         doSymbol(t);
     }

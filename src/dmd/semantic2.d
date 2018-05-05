@@ -41,7 +41,6 @@ import dmd.expression;
 import dmd.expressionsem;
 import dmd.func;
 import dmd.globals;
-import dmd.gluelayer;
 import dmd.id;
 import dmd.identifier;
 import dmd.init;
@@ -122,13 +121,13 @@ private extern(C++) final class Semantic2Visitor : Visitor
                 {
                     // same with pragma(msg)
                     se = se.toUTF8(sc);
-                    sa.error("\"%.*s\"", cast(int)se.len, se.string);
+                    error(sa.loc, "static assert:  \"%.*s\"", cast(int)se.len, se.string);
                 }
                 else
-                    sa.error("%s", sa.msg.toChars());
+                    error(sa.loc, "static assert:  %s", sa.msg.toChars());
             }
             else
-                sa.error("`%s` is false", sa.exp.toChars());
+                error(sa.loc, "static assert:  `%s` is false", sa.exp.toChars());
             if (sc.tinst)
                 sc.tinst.printInstantiationTrace();
             if (!global.gag)
@@ -138,9 +137,9 @@ private extern(C++) final class Semantic2Visitor : Visitor
 
     override void visit(TemplateInstance tempinst)
     {
-        if (tempinst.semanticRun >= PASSsemantic2)
+        if (tempinst.semanticRun >= PASS.semantic2)
             return;
-        tempinst.semanticRun = PASSsemantic2;
+        tempinst.semanticRun = PASS.semantic2;
         static if (LOG)
         {
             printf("+TemplateInstance.semantic2('%s')\n", tempinst.toChars());
@@ -200,9 +199,9 @@ private extern(C++) final class Semantic2Visitor : Visitor
 
     override void visit(TemplateMixin tmix)
     {
-        if (tmix.semanticRun >= PASSsemantic2)
+        if (tmix.semanticRun >= PASS.semantic2)
             return;
-        tmix.semanticRun = PASSsemantic2;
+        tmix.semanticRun = PASS.semantic2;
         static if (LOG)
         {
             printf("+TemplateMixin.semantic2('%s')\n", tmix.toChars());
@@ -232,10 +231,17 @@ private extern(C++) final class Semantic2Visitor : Visitor
 
     override void visit(VarDeclaration vd)
     {
-        if (vd.semanticRun < PASSsemanticdone && vd.inuse)
+        if (vd.semanticRun < PASS.semanticdone && vd.inuse)
             return;
 
         //printf("VarDeclaration::semantic2('%s')\n", toChars());
+
+        if (vd.aliassym)        // if it's a tuple
+        {
+            vd.aliassym.accept(this);
+            vd.semanticRun = PASS.semantic2done;
+            return;
+        }
 
         if (vd._init && !vd.toParent().isFuncDeclaration())
         {
@@ -273,15 +279,15 @@ private extern(C++) final class Semantic2Visitor : Visitor
                         return false;
                     }
 
-                    if (e.op == TOKclassreference)
+                    if (e.op == TOK.classReference)
                         return true;
-                    if (e.op == TOKaddress && (cast(AddrExp)e).e1.op == TOKstructliteral)
+                    if (e.op == TOK.address && (cast(AddrExp)e).e1.op == TOK.structLiteral)
                         return true;
-                    if (e.op == TOKarrayliteral)
+                    if (e.op == TOK.arrayLiteral)
                         return arrayHasInvalidEnumInitializer((cast(ArrayLiteralExp)e).elements);
-                    if (e.op == TOKstructliteral)
+                    if (e.op == TOK.structLiteral)
                         return arrayHasInvalidEnumInitializer((cast(StructLiteralExp)e).elements);
-                    if (e.op == TOKassocarrayliteral)
+                    if (e.op == TOK.assocArrayLiteral)
                     {
                         AssocArrayLiteralExp ae = cast(AssocArrayLiteralExp)e;
                         return arrayHasInvalidEnumInitializer(ae.values) ||
@@ -301,25 +307,25 @@ private extern(C++) final class Semantic2Visitor : Visitor
             if ((vd.type.ty == Tclass) && vd.type.isMutable() && !vd.type.isShared())
             {
                 ExpInitializer ei = vd._init.isExpInitializer();
-                if (ei && ei.exp.op == TOKclassreference)
+                if (ei && ei.exp.op == TOK.classReference)
                     vd.error("is a thread-local class and cannot have a static initializer. Use `static this()` to initialize instead.");
             }
             else if (vd.type.ty == Tpointer && vd.type.nextOf().ty == Tstruct && vd.type.nextOf().isMutable() && !vd.type.nextOf().isShared())
             {
                 ExpInitializer ei = vd._init.isExpInitializer();
-                if (ei && ei.exp.op == TOKaddress && (cast(AddrExp)ei.exp).e1.op == TOKstructliteral)
+                if (ei && ei.exp.op == TOK.address && (cast(AddrExp)ei.exp).e1.op == TOK.structLiteral)
                     vd.error("is a thread-local pointer to struct and cannot have a static initializer. Use `static this()` to initialize instead.");
             }
         }
-        vd.semanticRun = PASSsemantic2done;
+        vd.semanticRun = PASS.semantic2done;
     }
 
     override void visit(Module mod)
     {
         //printf("Module::semantic2('%s'): parent = %p\n", toChars(), parent);
-        if (mod.semanticRun != PASSsemanticdone) // semantic() not completed yet - could be recursive call
+        if (mod.semanticRun != PASS.semanticdone) // semantic() not completed yet - could be recursive call
             return;
-        mod.semanticRun = PASSsemantic2;
+        mod.semanticRun = PASS.semantic2;
         // Note that modules get their own scope, from scratch.
         // This is so regardless of where in the syntax a module
         // gets imported, it is unaffected by context.
@@ -337,17 +343,110 @@ private extern(C++) final class Semantic2Visitor : Visitor
         }
         sc = sc.pop();
         sc.pop();
-        mod.semanticRun = PASSsemantic2done;
+        mod.semanticRun = PASS.semantic2done;
         //printf("-Module::semantic2('%s'): parent = %p\n", toChars(), parent);
     }
 
     override void visit(FuncDeclaration fd)
     {
-        if (fd.semanticRun >= PASSsemantic2done)
-            return;
-        assert(fd.semanticRun <= PASSsemantic2);
+        import dmd.dmangle : mangleToFuncSignature;
 
-        fd.semanticRun = PASSsemantic2;
+        if (fd.semanticRun >= PASS.semantic2done)
+            return;
+        assert(fd.semanticRun <= PASS.semantic2);
+
+        fd.semanticRun = PASS.semantic2;
+
+        //printf("FuncDeclaration::semantic2 [%s] fd0 = %s %s\n", loc.toChars(), toChars(), type.toChars());
+
+        // https://issues.dlang.org/show_bug.cgi?id=18385
+        // Disable for 2.079, s.t. a deprecation cycle can be started with 2.080
+        if (0)
+        if (fd.overnext && !fd.errors)
+        {
+            OutBuffer buf1;
+            OutBuffer buf2;
+
+            // Always starts the lookup from 'this', because the conflicts with
+            // previous overloads are already reported.
+            auto f1 = fd;
+            mangleToFuncSignature(buf1, f1);
+
+            overloadApply(f1, (Dsymbol s)
+            {
+                auto f2 = s.isFuncDeclaration();
+                if (!f2 || f1 == f2 || f2.errors)
+                    return 0;
+
+                // Don't have to check conflict between declaration and definition.
+                if ((f1.fbody !is null) != (f2.fbody !is null))
+                    return 0;
+
+                /* Check for overload merging with base class member functions.
+                 *
+                 *  class B { void foo() {} }
+                 *  class D : B {
+                 *    override void foo() {}    // B.foo appears as f2
+                 *    alias foo = B.foo;
+                 *  }
+                 */
+                if (f1.overrides(f2))
+                    return 0;
+
+                // extern (C) functions always conflict each other.
+                if (f1.ident == f2.ident &&
+                    f1.toParent2() == f2.toParent2() &&
+                    (f1.linkage != LINK.d && f1.linkage != LINK.cpp) &&
+                    (f2.linkage != LINK.d && f2.linkage != LINK.cpp))
+                {
+                    /* Allow the hack that is actually used in druntime,
+                     * to ignore function attributes for extern (C) functions.
+                     * TODO: Must be reconsidered in the future.
+                     *  BUG: https://issues.dlang.org/show_bug.cgi?id=18206
+                     *
+                     *  extern(C):
+                     *  alias sigfn_t  = void function(int);
+                     *  alias sigfn_t2 = void function(int) nothrow @nogc;
+                     *  sigfn_t  bsd_signal(int sig, sigfn_t  func);
+                     *  sigfn_t2 bsd_signal(int sig, sigfn_t2 func) nothrow @nogc;  // no error
+                     */
+                    if (f1.fbody is null || f2.fbody is null)
+                        return 0;
+
+                    auto tf1 = cast(TypeFunction)f1.type;
+                    auto tf2 = cast(TypeFunction)f2.type;
+                    error(f2.loc, "%s `%s%s` cannot be overloaded with %s`extern(%s)` function at %s",
+                            f2.kind(),
+                            f2.toPrettyChars(),
+                            parametersTypeToChars(tf2.parameters, tf2.varargs),
+                            (f1.linkage == f2.linkage ? "another " : "").ptr,
+                            linkageToChars(f1.linkage), f1.loc.toChars());
+                    f2.type = Type.terror;
+                    f2.errors = true;
+                    return 0;
+                }
+
+                buf2.reset();
+                mangleToFuncSignature(buf2, f2);
+
+                auto s1 = buf1.peekString();
+                auto s2 = buf2.peekString();
+
+                //printf("+%s\n\ts1 = %s\n\ts2 = %s @ [%s]\n", toChars(), s1, s2, f2.loc.toChars());
+                if (strcmp(s1, s2) == 0)
+                {
+                    auto tf2 = cast(TypeFunction)f2.type;
+                    error(f2.loc, "%s `%s%s` conflicts with previous declaration at %s",
+                            f2.kind(),
+                            f2.toPrettyChars(),
+                            parametersTypeToChars(tf2.parameters, tf2.varargs),
+                            f1.loc.toChars());
+                    f2.type = Type.terror;
+                    f2.errors = true;
+                }
+                return 0;
+            });
+        }
 
         objc.setSelector(fd, sc);
         objc.validateSelector(fd);
@@ -374,9 +473,9 @@ private extern(C++) final class Semantic2Visitor : Visitor
 
     override void visit(Nspace ns)
     {
-        if (ns.semanticRun >= PASSsemantic2)
+        if (ns.semanticRun >= PASS.semantic2)
             return;
-        ns.semanticRun = PASSsemantic2;
+        ns.semanticRun = PASS.semantic2;
         static if (LOG)
         {
             printf("+Nspace::semantic2('%s')\n", ns.toChars());
@@ -385,7 +484,7 @@ private extern(C++) final class Semantic2Visitor : Visitor
         {
             assert(sc);
             sc = sc.push(ns);
-            sc.linkage = LINKcpp;
+            sc.linkage = LINK.cpp;
             foreach (s; *ns.members)
             {
                 static if (LOG)
@@ -453,7 +552,7 @@ private extern(C++) final class Semantic2Visitor : Visitor
                         e = e.expressionSemantic(sc);
                         if (definitelyValueParameter(e))
                             e = e.ctfeInterpret();
-                        if (e.op == TOKtuple)
+                        if (e.op == TOK.tuple)
                         {
                             TupleExp te = cast(TupleExp)e;
                             eval(sc, te.exps);
@@ -470,7 +569,7 @@ private extern(C++) final class Semantic2Visitor : Visitor
 
     override void visit(AggregateDeclaration ad)
     {
-        //printf("AggregateDeclaration::semantic2(%s) type = %s, errors = %d\n", toChars(), type.toChars(), errors);
+        //printf("AggregateDeclaration::semantic2(%s) type = %s, errors = %d\n", ad.toChars(), ad.type.toChars(), ad.errors);
         if (!ad.members)
             return;
 

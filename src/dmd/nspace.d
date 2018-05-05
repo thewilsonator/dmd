@@ -30,7 +30,7 @@ private enum LOG = false;
  */
 extern (C++) final class Nspace : ScopeDsymbol
 {
-    extern (D) this(Loc loc, Identifier ident, Dsymbols* members)
+    extern (D) this(const ref Loc loc, Identifier ident, Dsymbols* members)
     {
         super(ident);
         //printf("Nspace::Nspace(ident = %s)\n", ident.toChars());
@@ -63,7 +63,7 @@ extern (C++) final class Nspace : ScopeDsymbol
             }
             assert(sc);
             sc = sc.push(this);
-            sc.linkage = LINKcpp; // namespaces default to C++ linkage
+            sc.linkage = LINK.cpp; // namespaces default to C++ linkage
             sc.parent = this;
             foreach (s; *members)
             {
@@ -81,7 +81,7 @@ extern (C++) final class Nspace : ScopeDsymbol
         {
             assert(sc);
             sc = sc.push(this);
-            sc.linkage = LINKcpp; // namespaces default to C++ linkage
+            sc.linkage = LINK.cpp; // namespaces default to C++ linkage
             sc.parent = this;
             foreach (s; *members)
             {
@@ -96,7 +96,7 @@ extern (C++) final class Nspace : ScopeDsymbol
         return Dsymbol.oneMember(ps, ident);
     }
 
-    override final Dsymbol search(Loc loc, Identifier ident, int flags = SearchLocalsOnly)
+    override final Dsymbol search(const ref Loc loc, Identifier ident, int flags = SearchLocalsOnly)
     {
         //printf("%s.Nspace.search('%s')\n", toChars(), ident.toChars());
         if (_scope && !symtab)

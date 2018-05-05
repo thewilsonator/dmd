@@ -30,9 +30,12 @@ static char __file__[] = __FILE__;      /* for tassert.h                */
 /* Since many routines are nearly identical, we can combine them with   */
 /* this flag:                                                           */
 
-#define AE      1
-#define CP      2
-#define VBE     3
+enum
+{
+    AE = 1,
+    CP,
+    VBE
+};
 
 static int flowxx;              /* one of the above values              */
 
@@ -72,10 +75,7 @@ STATIC void flowaecp(void);
  */
 
 void flowrd()
-{       vec_t tmp;
-        unsigned i;
-        bool anychng;
-
+{
         rdgenkill();            /* Compute Bgen and Bkill for RDs       */
         if (go.deftop == 0)        /* if no definition elems               */
                 return;         /* no analysis to be done               */
@@ -88,7 +88,8 @@ void flowrd()
         for (unsigned i = 0; i < dfotop; i++)
                 vec_copy(dfo[i]->Boutrd,dfo[i]->Bgen);
 
-        tmp = vec_calloc(go.deftop);
+        bool anychng;
+        vec_t tmp = vec_calloc(go.deftop);
         do
         {       anychng = FALSE;
                 for (unsigned i = 0; i < dfotop; i++)    // for each block
@@ -1461,6 +1462,13 @@ STATIC void accumlv(vec_t GEN,vec_t KILL,elem *n)
                 }
                 break;
 
+            case OPbt:                          // much like OPind
+                accumlv(GEN,KILL,n->E1);
+                accumlv(GEN,KILL,n->E2);
+                vec_orass(GEN,ambigsym);
+                vec_subass(GEN,KILL);
+                break;
+
             case OPind:
             case OPucall:
             case OPucallns:
@@ -1592,11 +1600,11 @@ void flowvbe()
  */
 
 STATIC void accumvbe(vec_t GEN,vec_t KILL,elem *n)
-{       unsigned op,i;
+{
         elem *t;
 
         assert(GEN && KILL && n);
-        op = n->Eoper;
+        unsigned op = n->Eoper;
 
         switch (op)
         {

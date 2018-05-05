@@ -49,6 +49,11 @@ struct Loc
 void error(Loc loc, const char *format, ...);
 #endif
 
+#if MARS
+// C++ name mangling is handled by front end
+#define cpp_mangle(s) ((s)->Sident)
+#endif
+
 #if TARGET_WINDOS
 
 static char __file__[] = __FILE__;      // for tassert.h
@@ -1471,14 +1476,12 @@ STATIC void objheader(char *csegname)
 
     // Put out segment and group names
     if (csegname)
-    {   char *p;
-        size_t i;
-
+    {
         // Replace the module name _TEXT with the new code segment name
-        i = strlen(csegname);
-        p = (char *)alloca(lnamesize + i - 5);
+        const size_t i = strlen(csegname);
+        char *p = (char *)alloca(lnamesize + i - 5);
         memcpy(p,lnames,8);
-        p[texti] = i;
+        p[texti] = (char)i;
         texti++;
         memcpy(p + texti,csegname,i);
         memcpy(p + texti + i,lnames + texti + 5,lnamesize - (texti + 5));
@@ -2067,7 +2070,7 @@ int Obj::codeseg(char *name,int suffix)
     // Put out LNAMES record
     size_t lnamesize = strlen(name) + suffix * 5;
     char *lnames = (char *) alloca(1 + lnamesize + 1);
-    lnames[0] = lnamesize;
+    lnames[0] = (char)lnamesize;
     assert(lnamesize <= (255 - 2 - sizeof(int)*3));
     strcpy(lnames + 1,name);
     if (suffix)
@@ -2403,6 +2406,7 @@ size_t Obj::mangle(Symbol *s,char *dest)
                 break;
             }
         case mTYman_c:
+        case mTYman_d:
             if (config.flags4 & CFG4underscore)
             {
                 dest[1] = '_';          // leading _ in name
@@ -2410,7 +2414,6 @@ size_t Obj::mangle(Symbol *s,char *dest)
                 len++;
                 break;
             }
-        case mTYman_d:
         case mTYman_sys:
             memcpy(dest + 1, name, len);        // no mangling
             dest[1 + len] = 0;
@@ -2430,7 +2433,7 @@ size_t Obj::mangle(Symbol *s,char *dest)
         len += 4;
     }
     else
-    {   *dest = len;
+    {   *dest = (char)len;
         len++;
     }
     if (name2)
@@ -3091,8 +3094,7 @@ void Obj::write_byte(seg_data *pseg, unsigned byte)
  */
 
 void Obj::_byte(int seg,targ_size_t offset,unsigned byte)
-{   unsigned i;
-
+{
     Ledatarec *lr = SegData[seg]->ledata;
     if (!lr)
         goto L2;
@@ -3121,10 +3123,10 @@ L2:
 L1:     ;
     }
 
-  i = offset - lr->offset;
-  if (lr->i <= i)
+    unsigned i = offset - lr->offset;
+    if (lr->i <= i)
         lr->i = i + 1;
-  lr->data[i] = byte;           // 1st byte of data
+    lr->data[i] = byte;           // 1st byte of data
 }
 
 /***********************************
@@ -3193,7 +3195,7 @@ unsigned Obj::bytes(int seg,targ_size_t offset,unsigned nbytes, void *p)
 
 void Obj::ledata(int seg,targ_size_t offset,targ_size_t data,
         unsigned lcfd,unsigned idx1,unsigned idx2)
-{   unsigned i;
+{
     unsigned size;                      // number of bytes to output
 
     unsigned ptrsize = tysize(TYfptr);
@@ -3236,7 +3238,7 @@ void Obj::ledata(int seg,targ_size_t offset,targ_size_t data,
 L1:     ;
     }
 
-    i = offset - lr->offset;
+    unsigned i = offset - lr->offset;
     if (lr->i < i + size)
         lr->i = i + size;
     if (size == 2 || !I32)
