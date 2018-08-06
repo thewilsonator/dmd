@@ -1489,12 +1489,11 @@ final class Parser(AST) : Lexer
         constraint = parseConstraint(msg);
         if (!constraint)
             return null;
-
-        AST.Expressions* es = new AST.Expressions(2);
+        AST.Expressions* es = new AST.Expressions();
         do
         {
             es.push(constraint);
-            es.push(constraint);
+            es.push(msg);
             constraint = parseConstraint(msg);
         }
         while (constraint);
@@ -1518,11 +1517,11 @@ final class Parser(AST) : Lexer
 
         nextToken(); // skip over 'if'
         check(TOK.leftParentheses);
-        AST.Expression constraint = parseExpression();
+        AST.Expression constraint = parseAssignExp();
         if (token.value == TOK.comma)
         {
             nextToken(); // skip comma
-            msg = parseExpression();
+            msg = parseAssignExp();
         }
         else
         {

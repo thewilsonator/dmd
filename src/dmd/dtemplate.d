@@ -523,7 +523,7 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
     // threaded list of previous instantiation attempts on stack
     TemplatePrevious* previous;
 
-    extern (D) this(const ref Loc loc, Identifier id, TemplateParameters* parameters, Expressions* constraint, Dsymbols* decldefs, bool ismixin = false, bool literal = false)
+    extern (D) this(const ref Loc loc, Identifier id, TemplateParameters* parameters, Expressions* constraints, Dsymbols* decldefs, bool ismixin = false, bool literal = false)
     {
         super(id);
         static if (LOG)

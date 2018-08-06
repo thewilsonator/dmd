@@ -2734,6 +2734,9 @@ extern (C++) FuncDeclaration resolveFuncCall(const ref Loc loc, Scope* sc, Dsymb
                 {
                     Scope* paramscope = td.scopeForTemplateParameters(ti,sc);
                     .errorSupplemental(td.loc, "`%s`", td.toCharsNoConstraint());
+                    Loc loc = Loc.initial;
+                    enum strfmt   = "        %s satisfied: %.*s";
+                    enum otherfmt = "        %s satisfied: `%s`"
                     foreach(i; 0 .. td.constraints.dim/2)
                     {
                         auto expr = (*td.constraints)[2*i];
@@ -2741,9 +2744,28 @@ extern (C++) FuncDeclaration resolveFuncCall(const ref Loc loc, Scope* sc, Dsymb
                         bool satisfied = td.evaluateConstraint(expr,ti,sc,paramscope,dedargs,null);
                         const(char)* sat = !satisfied ? "not" : "   ";
                         if (msg)
-                            .message("\t\t%s satisfied: %s",   sat, msg.toChars());
+                        {
+                            import dmd.expressionsem;
+                            sc = sc.startCTFE();
+                            msg = msg.expressionSemantic(sc);
+                            msg = resolveProperties(sc, msg);
+                            sc = sc.endCTFE();
+                            msg = msg.ctfeInterpret();
+                            if (StringExp se = msg.toStringExp())
+                            {
+                                // same with pragma(msg)
+                                se = se.toUTF8(sc);
+                                .errorSupplemental(loc, strfmt, sat,cast(int)se.len, se.string);
+                            }
+                            else
+                            {
+                                .errorSupplemental(loc, otherfmt, sat, msg.toChars());
+                            }
+                        }
                         else
-                            .message("\t\t%s satisfied: `%s`", sat, expr.toChars());
+                        {
+                            .errorSupplemental(loc, otherfmt, sat, expr.toChars());
+                        }
                     }
                 }
                 if (global.params.verbose || --numToDisplay != 0 || !td.overnext)

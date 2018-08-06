@@ -1037,19 +1037,20 @@ struct ASTBase
     {
         TemplateParameters* parameters;
         TemplateParameters* origParameters;
-        Expression constraint;
+        Expressions* constraint;
         bool literal;
         bool ismixin;
         bool isstatic;
         Prot protection;
         Dsymbol onemember;
 
-        extern (D) this(const ref Loc loc, Identifier id, TemplateParameters* parameters, Expression constraint, Dsymbols* decldefs, bool ismixin = false, bool literal = false)
+        extern (D) this(const ref Loc loc, Identifier id, TemplateParameters* parameters, Expressions* constraint, Dsymbols* decldefs, bool ismixin = false, bool literal = false)
         {
             super(id);
             this.loc = loc;
             this.parameters = parameters;
             this.origParameters = parameters;
+            this.constraints = constraints;
             this.members = decldefs;
             this.literal = literal;
             this.ismixin = ismixin;
