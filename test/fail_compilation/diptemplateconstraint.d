@@ -4,13 +4,13 @@ TEST_OUTPUT:
 fail_compilation/diptemplateconstraint(31): Error: template `foo` cannot deduce function from argument types !()(), candidates are:
 fail_compilation/diptemplateconstraint.d(17):        foo()()
         not satisfied: zero
-            satisfied: 1
+            satisfied: `1`
 satisfied: one
 fail_compilation/diptemplateconstraint.d(24):        foo()()
         not satisfied: zero
-        not satisfied: 0
+        not satisfied: `0`
             satisfied: five
-            satisfied: 4
+            satisfied: `4`
 ---
 */
 
