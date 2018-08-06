@@ -340,7 +340,7 @@ private Dsymbol getEponymousMember(TemplateDeclaration td)
     if (auto em = td.onemember.isEnumMember())
         return null;    // Keep backward compatibility. See compilable/ddoc9.d
     if (VarDeclaration vd = td.onemember.isVarDeclaration())
-        return td.constraint ? null : vd;
+        return td.constraints ? null : vd;
     return null;
 }
 
@@ -1208,7 +1208,7 @@ private void toDocBuffer(Dsymbol s, OutBuffer* buf, Scope* sc)
                 buf.writeByte(')');
             }
             // emit constraints if declaration is a templated declaration
-            if (td && td.constraint)
+            if (td && td.constraints)
             {
                 bool noFuncDecl = td.isFuncDeclaration() is null;
                 if (noFuncDecl)
@@ -1216,7 +1216,10 @@ private void toDocBuffer(Dsymbol s, OutBuffer* buf, Scope* sc)
                     buf.writestring("$(DDOC_CONSTRAINT ");
                 }
 
-                .toCBuffer(td.constraint, buf, &hgs);
+                foreach(i; 0 .. td.constraints.dim/2)
+                {
+                    .toCBuffer((*td.constraints)[2*i], buf, &hgs);
+                }
 
                 if (noFuncDecl)
                 {

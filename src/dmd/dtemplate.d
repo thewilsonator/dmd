@@ -577,7 +577,7 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
             for (size_t i = 0; i < p.dim; i++)
                 (*p)[i] = (*parameters)[i].syntaxCopy();
         }
-        return new TemplateDeclaration(loc, ident, p, constraints ? constraints.syntaxCopy() : null, Dsymbol.arraySyntaxCopy(members), ismixin, literal);
+        return new TemplateDeclaration(loc, ident, p, Expression.arraySyntaxCopy(constraints), Dsymbol.arraySyntaxCopy(members), ismixin, literal);
     }
 
     /**********************************
@@ -638,15 +638,15 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
 
         toBufferNoConstraint(buf,hgs);
         
-        if (constraint)
+        if (constraints)
         {
-            auto dim = constraint.dim;
+            auto dim = constraints.dim;
             dim /= 2; // constraint message pairs
             foreach(i; 0 .. dim)
             {
                 buf.writestring(" if (");
-                auto expr = (*constraint)[2*i];
-                auto msg  = (*constraint)[2*i + 1];
+                auto expr = (*constraints)[2*i];
+                auto msg  = (*constraints)[2*i + 1];
                 .toCBuffer(expr, &buf, &hgs);
 
                 if (msg)
@@ -700,11 +700,10 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
 
     bool evaluateConstraints(TemplateInstance ti, Scope* sc, Scope* paramscope, Objects* dedargs, FuncDeclaration fd)
     {
-        auto dim = constraints.dim;
-        dim /= 2; // constraint message pairs
-        foreach(i; 0 .. dim)
+        foreach(i; 0 .. constraints.dim/2)
         {
-            if (!evaluateConstraint(ti,sc,paramscope,dedargs,fd);
+            auto constraint = (*constraints)[2*i];
+            if (!evaluateConstraint(constraint,ti,sc,paramscope,dedargs,fd))
                 return false;
         }
         return true;
@@ -835,7 +834,7 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
      * Returns:
      *      a scope for the parameters of ti
      */
-    Scope* scopeForTemplateParameters(TemplateInstance ti, Scope* sc, ScopeDsymbol* paramsym = null)
+    Scope* scopeForTemplateParameters(TemplateInstance ti, Scope* sc, ScopeDsymbol paramsym = null)
     {
         if (!paramsym) paramsym = new ScopeDsymbol();
         paramsym.parent = _scope.parent;
@@ -958,7 +957,7 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
             }
         }
 
-        if (m > MATCH.nomatch && constraint && !flag)
+        if (m > MATCH.nomatch && constraints && !flag)
         {
             if (ti.hasNestedArgs(ti.tiargs, this.isstatic)) // TODO: should gag error
                 ti.parent = ti.enclosing;

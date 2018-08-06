@@ -615,8 +615,8 @@ package mixin template ParseVisitMethods(AST)
         {
             assert(fd.type);
             visitFunctionType(cast(AST.TypeFunction)fd.type, d);
-            if (d.constraint)
-                d.constraint.accept(this);
+            if (d.constraints)
+                visitConstraints(d);
             visitFuncBody(fd);
 
             return true;
@@ -625,8 +625,8 @@ package mixin template ParseVisitMethods(AST)
         if (AST.AggregateDeclaration ad = onemember.isAggregateDeclaration())
         {
             visitTemplateParameters(d.parameters);
-            if (d.constraint)
-                d.constraint.accept(this);
+            if (d.constraints)
+                visitConstraints(d);
             visitBaseClasses(ad.isClassDeclaration());
 
             if (ad.members)
@@ -638,7 +638,7 @@ package mixin template ParseVisitMethods(AST)
 
         if (AST.VarDeclaration vd = onemember.isVarDeclaration())
         {
-            if (d.constraint)
+            if (d.constraints)
                 return false;
             if (vd.type)
                 visitType(vd.type);
@@ -673,13 +673,20 @@ package mixin template ParseVisitMethods(AST)
             return;
 
         visitTemplateParameters(d.parameters);
-        if (d.constraint)
-            d.constraint.accept(this);
+        if (d.constraints)
+            visitConstraints(d);
 
         foreach (s; *d.members)
             s.accept(this);
     }
-
+    void visitConstraints(AST.TemplateDeclaration d)
+    {
+        foreach(i; 0 .. d.constraints.dim/2)
+        {
+            auto expr = (*d.constraints)[2*i];
+            expr.accept(this);
+        }
+    }
     void visitObject(RootObject oarg)
     {
         if (auto t = AST.isType(oarg))

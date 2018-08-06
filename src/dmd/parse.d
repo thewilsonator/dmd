@@ -1483,22 +1483,23 @@ final class Parser(AST) : Lexer
      * Constraint is of the form:
      *      if ( ConstraintExpression )
      */
-    AST.Expressions* parseConstraint()
+    AST.Expressions* parseConstraints()
     {
-        AST.expression constraint, msg;
+        AST.Expression constraint, msg;
         constraint = parseConstraint(msg);
         if (!constraint)
             return null;
 
-        AST.Expressions* es = new Expressions(2);
+        AST.Expressions* es = new AST.Expressions(2);
         do
         {
             es.push(constraint);
             es.push(constraint);
+            constraint = parseConstraint(msg);
         }
-        while ((constraint = parseConstraint(msg)));
+        while (constraint);
 
-        return e;
+        return es;
     }
     
     /**************************************

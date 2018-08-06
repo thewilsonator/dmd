@@ -743,11 +743,21 @@ public:
             }
             objectEnd();
         }
-        arrayEnd();
-        Expression expression = d.constraint;
-        if (expression)
+
+        if (d.constraints)
         {
-            property("constraint", expression.toChars());
+            propertyStart("constraints");
+            arrayStart();
+            foreach(i; 0 .. d.constraints.dim/2)
+            {
+                objectStart();
+                auto expr = (*d.constraints)[2*i];
+                auto msg  = (*d.constraints)[2*i + 1];
+                property("constraint", expr.toChars());
+                property("message", msg? msg.toChars() : expr.toChars());
+                objectStart();
+            }
+            arrayEnd();
         }
         propertyStart("members");
         arrayStart();

@@ -64,7 +64,7 @@ public:
     TemplateParameters *parameters;     // array of TemplateParameter's
 
     TemplateParameters *origParameters; // originals for Ddoc
-    Expression *constraint;
+    Expressions *constraint;
 
     // Hash table to look up TemplateInstance's of this TemplateDeclaration
     void *instances;

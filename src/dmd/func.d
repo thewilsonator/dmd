@@ -2721,7 +2721,7 @@ extern (C++) FuncDeclaration resolveFuncCall(const ref Loc loc, Scope* sc, Dsymb
 
             // Display candidate templates (even if there are no multiple overloads)
             scope dedargs = new Objects();
-            scope ti = new TemplateInstance(loc,null,tiargs);
+            scope ti = new TemplateInstance(loc, cast(Identifier) null,tiargs);
             int numToDisplay = numOverloadsDisplay;
             overloadApply(td, (Dsymbol s)
             {
@@ -2736,13 +2736,14 @@ extern (C++) FuncDeclaration resolveFuncCall(const ref Loc loc, Scope* sc, Dsymb
                     .errorSupplemental(td.loc, "`%s`", td.toCharsNoConstraint());
                     foreach(i; 0 .. td.constraints.dim/2)
                     {
-                        auto expr = (*td.constraint)[2*i];
-                        auto msg  = (*td.constraint)[2*i + 1];
+                        auto expr = (*td.constraints)[2*i];
+                        auto msg  = (*td.constraints)[2*i + 1];
                         bool satisfied = td.evaluateConstraint(expr,ti,sc,paramscope,dedargs,null);
+                        const(char)* sat = !satisfied ? "not" : "   ";
                         if (msg)
-                            .message("\t\t%s satisfied: %s",!satisfied ? "not" : "   ",msg.toChars());
+                            .message("\t\t%s satisfied: %s",   sat, msg.toChars());
                         else
-                            .message("\t\t%s satisfied: `%s`",!satisfied ? "not" : "   ",expr.toChars());
+                            .message("\t\t%s satisfied: `%s`", sat, expr.toChars());
                     }
                 }
                 if (global.params.verbose || --numToDisplay != 0 || !td.overnext)

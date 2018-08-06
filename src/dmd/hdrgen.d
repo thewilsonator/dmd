@@ -1430,7 +1430,7 @@ public:
         buf.writeByte('(');
         visitTemplateParameters(hgs.ddoc ? d.origParameters : d.parameters);
         buf.writeByte(')');
-        visitTemplateConstraint(d.constraint);
+        visitTemplateConstraint(d.constraints);
         if (hgs.hdrgen || hgs.fullDump)
         {
             hgs.tpltMember++;
@@ -1460,7 +1460,7 @@ public:
             if (stcToBuffer(buf, fd.storage_class))
                 buf.writeByte(' ');
             functionToBufferFull(cast(TypeFunction)fd.type, buf, d.ident, hgs, d);
-            visitTemplateConstraint(d.constraint);
+            visitTemplateConstraint(d.constraints);
             hgs.tpltMember++;
             bodyToBuffer(fd);
             hgs.tpltMember--;
@@ -1474,7 +1474,7 @@ public:
             buf.writeByte('(');
             visitTemplateParameters(hgs.ddoc ? d.origParameters : d.parameters);
             buf.writeByte(')');
-            visitTemplateConstraint(d.constraint);
+            visitTemplateConstraint(d.constraints);
             visitBaseClasses(ad.isClassDeclaration());
             hgs.tpltMember++;
             if (ad.members)
@@ -1496,7 +1496,7 @@ public:
         }
         if (VarDeclaration vd = onemember.isVarDeclaration())
         {
-            if (d.constraint)
+            if (d.constraints)
                 return false;
             if (stcToBuffer(buf, vd.storage_class))
                 buf.writeByte(' ');
@@ -1535,12 +1535,16 @@ public:
         }
     }
 
-    void visitTemplateConstraint(Expression constraint)
+    void visitTemplateConstraint(Expressions* constraints)
     {
-        if (!constraint)
+        if (!constraints)
             return;
         buf.writestring(" if (");
-        constraint.accept(this);
+        foreach(i; 0 .. constraints.dim/2)
+        {
+            auto expr = (*constraints)[2*i];
+            expr.accept(this);
+        }
         buf.writeByte(')');
     }
 
