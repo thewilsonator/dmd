@@ -502,7 +502,8 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
     TemplateParameters* parameters;     // array of TemplateParameter's
     TemplateParameters* origParameters; // originals for Ddoc
 
-    Expression constraint;
+    // Alternating constraint, message. If message is null use constraint.toChars
+    Expressions* constraints;
 
     // Hash table to look up TemplateInstance's of this TemplateDeclaration
     TemplateInstance[TemplateInstanceBox] instances;
@@ -522,7 +523,7 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
     // threaded list of previous instantiation attempts on stack
     TemplatePrevious* previous;
 
-    extern (D) this(const ref Loc loc, Identifier id, TemplateParameters* parameters, Expression constraint, Dsymbols* decldefs, bool ismixin = false, bool literal = false)
+    extern (D) this(const ref Loc loc, Identifier id, TemplateParameters* parameters, Expressions* constraint, Dsymbols* decldefs, bool ismixin = false, bool literal = false)
     {
         super(id);
         static if (LOG)
@@ -546,7 +547,7 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
         this.loc = loc;
         this.parameters = parameters;
         this.origParameters = parameters;
-        this.constraint = constraint;
+        this.constraints = constraints;
         this.members = decldefs;
         this.literal = literal;
         this.ismixin = ismixin;
@@ -576,7 +577,7 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
             for (size_t i = 0; i < p.dim; i++)
                 (*p)[i] = (*parameters)[i].syntaxCopy();
         }
-        return new TemplateDeclaration(loc, ident, p, constraint ? constraint.syntaxCopy() : null, Dsymbol.arraySyntaxCopy(members), ismixin, literal);
+        return new TemplateDeclaration(loc, ident, p, constraints ? constraints.syntaxCopy() : null, Dsymbol.arraySyntaxCopy(members), ismixin, literal);
     }
 
     /**********************************
@@ -635,6 +636,41 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
         OutBuffer buf;
         HdrGenState hgs;
 
+        toBufferNoConstraint(buf,hgs);
+        
+        if (constraint)
+        {
+            auto dim = constraint.dim;
+            dim /= 2; // constraint message pairs
+            foreach(i; 0 .. dim)
+            {
+                buf.writestring(" if (");
+                auto expr = (*constraint)[2*i];
+                auto msg  = (*constraint)[2*i + 1];
+                .toCBuffer(expr, &buf, &hgs);
+
+                if (msg)
+                {
+                    buf.writestring(", ");
+                    .toCBuffer(msg, &buf, &hgs);
+                }
+
+                buf.writeByte(')');
+            }
+        }
+        return buf.extractString();
+    }
+
+    const(char)* toCharsNoConstraint()
+    {
+        OutBuffer buf;
+        HdrGenState hgs;
+        toBufferNoConstraint(buf,hgs);
+        return buf.extractString();
+    }
+
+    void toBufferNoConstraint(ref OutBuffer buf, ref HdrGenState hgs)
+    {
         buf.writestring(ident.toChars());
         buf.writeByte('(');
         for (size_t i = 0; i < parameters.dim; i++)
@@ -655,14 +691,6 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
                 buf.writestring(parametersTypeToChars(tf.parameters, tf.varargs));
             }
         }
-
-        if (constraint)
-        {
-            buf.writestring(" if (");
-            .toCBuffer(constraint, &buf, &hgs);
-            buf.writeByte(')');
-        }
-        return buf.extractString();
     }
 
     override Prot prot()
@@ -670,10 +698,22 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
         return protection;
     }
 
+    bool evaluateConstraints(TemplateInstance ti, Scope* sc, Scope* paramscope, Objects* dedargs, FuncDeclaration fd)
+    {
+        auto dim = constraints.dim;
+        dim /= 2; // constraint message pairs
+        foreach(i; 0 .. dim)
+        {
+            if (!evaluateConstraint(ti,sc,paramscope,dedargs,fd);
+                return false;
+        }
+        return true;
+    }
     /****************************
      * Check to see if constraint is satisfied.
      */
-    bool evaluateConstraint(TemplateInstance ti, Scope* sc, Scope* paramscope, Objects* dedargs, FuncDeclaration fd)
+    bool evaluateConstraint(Expression constraint, TemplateInstance ti, Scope* sc, Scope* paramscope,
+                            Objects* dedargs, FuncDeclaration fd)
     {
         /* Detect recursive attempts to instantiate this template declaration,
          * https://issues.dlang.org/show_bug.cgi?id=4072
@@ -955,7 +995,7 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
             }
 
             // TODO: dedtypes => ti.tiargs ?
-            if (!evaluateConstraint(ti, sc, paramscope, dedtypes, fd))
+            if (!evaluateConstraints(ti, sc, paramscope, dedtypes, fd))
                 goto Lnomatch;
         }
 
@@ -1987,9 +2027,9 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
                 goto Lnomatch;
         }
 
-        if (constraint)
+        if (constraints)
         {
-            if (!evaluateConstraint(ti, sc, paramscope, dedargs, fd))
+            if (!evaluateConstraints(ti, sc, paramscope, dedargs, fd))
                 goto Lnomatch;
         }
 

@@ -1479,21 +1479,56 @@ final class Parser(AST) : Lexer
     }
 
     /**************************************
-     * Parse constraint.
+     * Parse constraints.
      * Constraint is of the form:
      *      if ( ConstraintExpression )
      */
-    AST.Expression parseConstraint()
+    AST.Expressions* parseConstraint()
     {
-        AST.Expression e = null;
-        if (token.value == TOK.if_)
+        AST.expression constraint, msg;
+        constraint = parseConstraint(msg);
+        if (!constraint)
+            return null;
+
+        AST.Expressions* es = new Expressions(2);
+        do
         {
-            nextToken(); // skip over 'if'
-            check(TOK.leftParentheses);
-            e = parseExpression();
-            check(TOK.rightParentheses);
+            es.push(constraint);
+            es.push(constraint);
         }
+        while ((constraint = parseConstraint(msg)));
+
         return e;
+    }
+    
+    /**************************************
+     * Parse constraint.
+     * Constraint is of the form:
+     *      if ( ConstraintExpression )
+     *      if ( ConstraintExpression , MessageExpression)
+     */
+    AST.Expression parseConstraint(out AST.Expression msg)
+    {
+        if (token.value != TOK.if_)
+        {
+            msg = null;
+            return null;
+        }
+
+        nextToken(); // skip over 'if'
+        check(TOK.leftParentheses);
+        AST.Expression constraint = parseExpression();
+        if (token.value == TOK.comma)
+        {
+            nextToken(); // skip comma
+            msg = parseExpression();
+        }
+        else
+        {
+            msg = null;
+        }
+        check(TOK.rightParentheses);
+        return constraint;
     }
 
     /**************************************
@@ -1505,7 +1540,7 @@ final class Parser(AST) : Lexer
         Identifier id;
         AST.TemplateParameters* tpl;
         AST.Dsymbols* decldefs;
-        AST.Expression constraint = null;
+        AST.Expressions* constraint = null;
         const loc = token.loc;
 
         nextToken();
@@ -1520,7 +1555,7 @@ final class Parser(AST) : Lexer
         if (!tpl)
             goto Lerr;
 
-        constraint = parseConstraint();
+        constraint = parseConstraints();
 
         if (token.value != TOK.leftCurly)
         {
@@ -2410,7 +2445,7 @@ final class Parser(AST) : Lexer
                 error(loc, "use `shared static this()` to declare a shared static constructor");
         }
 
-        AST.Expression constraint = tpl ? parseConstraint() : null;
+        AST.Expressions* constraint = tpl ? parseConstraints() : null;
 
         AST.Type tf = new AST.TypeFunction(parameters, null, varargs, linkage, stc); // RetrunType -> auto
         tf = tf.addSTC(stc);
@@ -3181,7 +3216,7 @@ final class Parser(AST) : Lexer
     AST.Dsymbol parseAggregate()
     {
         AST.TemplateParameters* tpl = null;
-        AST.Expression constraint;
+        AST.Expressions* constraint;
         const loc = token.loc;
         TOK tok = token.value;
 
@@ -3201,7 +3236,7 @@ final class Parser(AST) : Lexer
             {
                 // struct/class template declaration.
                 tpl = parseTemplateParameterList();
-                constraint = parseConstraint();
+                constraint = parseConstraints();
             }
         }
 
@@ -3219,7 +3254,7 @@ final class Parser(AST) : Lexer
         {
             if (constraint)
                 error("template constraints appear both before and after BaseClassList, put them before");
-            constraint = parseConstraint();
+            constraint = parseConstraints();
         }
         if (constraint)
         {
@@ -4629,13 +4664,13 @@ final class Parser(AST) : Lexer
             }
             else if (t.ty == AST.Tfunction)
             {
-                AST.Expression constraint = null;
+                AST.Expressions* constraint = null;
                 //printf("%s funcdecl t = %s, storage_class = x%lx\n", loc.toChars(), t.toChars(), storage_class);
                 auto f = new AST.FuncDeclaration(loc, Loc.initial, ident, storage_class | (disable ? AST.STC.disable : 0), t);
                 if (pAttrs)
                     pAttrs.storageClass = AST.STC.undefined_;
                 if (tpl)
-                    constraint = parseConstraint();
+                    constraint = parseConstraints();
                 AST.Dsymbol s = parseContracts(f);
                 auto tplIdent = s.ident;
 

@@ -2720,13 +2720,31 @@ extern (C++) FuncDeclaration resolveFuncCall(const ref Loc loc, Scope* sc, Dsymb
                 tiargsBuf.peekString(), fargsBuf.peekString());
 
             // Display candidate templates (even if there are no multiple overloads)
+            scope dedargs = new Objects();
+            scope ti = new TemplateInstance(loc,null,tiargs);
             int numToDisplay = numOverloadsDisplay;
             overloadApply(td, (Dsymbol s)
             {
                 auto td = s.isTemplateDeclaration();
                 if (!td)
                     return 0;
-                .errorSupplemental(td.loc, "`%s`", td.toPrettyChars());
+                if (td.constraints.dim == 2)
+                    .errorSupplemental(td.loc, "`%s`", td.toPrettyChars());
+                else
+                {
+                    Scope* paramscope = td.scopeForTemplateParameters(ti,sc);
+                    .errorSupplemental(td.loc, "`%s`", td.toCharsNoConstraint());
+                    foreach(i; 0 .. td.constraints.dim/2)
+                    {
+                        auto expr = (*td.constraint)[2*i];
+                        auto msg  = (*td.constraint)[2*i + 1];
+                        bool satisfied = td.evaluateConstraint(expr,ti,sc,paramscope,dedargs,null);
+                        if (msg)
+                            .message("\t\t%s satisfied: %s",!satisfied ? "not" : "   ",msg.toChars());
+                        else
+                            .message("\t\t%s satisfied: `%s`",!satisfied ? "not" : "   ",expr.toChars());
+                    }
+                }
                 if (global.params.verbose || --numToDisplay != 0 || !td.overnext)
                     return 0;
 
