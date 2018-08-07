@@ -1489,14 +1489,27 @@ final class Parser(AST) : Lexer
         constraint = parseConstraint(msg);
         if (!constraint)
             return null;
+        // See if there is only one constraint and no message so we
+        // can take advantage of the small array optimisation.
         AST.Expressions* es = new AST.Expressions();
-        do
+        AST.Expression constraint2, msg2;
+        constraint2 = parseConstraint(msg2);
+        if (!constraint2 && !msg)
+        {
+            es.push(constraint);
+            return es;
+        }
+        else
         {
             es.push(constraint);
             es.push(msg);
-            constraint = parseConstraint(msg);
+            while (constraint2)
+            {
+                es.push(constraint2);
+                es.push(msg2);
+                constraint2 = parseConstraint(msg2);
+            }
         }
-        while (constraint);
 
         return es;
     }

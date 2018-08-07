@@ -2728,7 +2728,7 @@ extern (C++) FuncDeclaration resolveFuncCall(const ref Loc loc, Scope* sc, Dsymb
                 auto td = s.isTemplateDeclaration();
                 if (!td)
                     return 0;
-                if (td.constraints.dim == 2)
+                if (td.constraints.dim <= 1)
                     .errorSupplemental(td.loc, "`%s`", td.toPrettyChars());
                 else
                 {

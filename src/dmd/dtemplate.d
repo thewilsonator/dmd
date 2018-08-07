@@ -641,8 +641,14 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
         if (constraints)
         {
             auto dim = constraints.dim;
-            dim /= 2; // constraint message pairs
-            foreach(i; 0 .. dim)
+            if (dim == 1)
+            {
+                buf.writestring(" if (");
+                .toCBuffer((*constraints)[0], &buf, &hgs);
+                buf.writeByte(')');
+            }
+            else
+            foreach(i; 0 .. dim/2)
             {
                 buf.writestring(" if (");
                 auto expr = (*constraints)[2*i];
@@ -700,7 +706,8 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
 
     bool evaluateConstraints(TemplateInstance ti, Scope* sc, Scope* paramscope, Objects* dedargs, FuncDeclaration fd)
     {
-        foreach(i; 0 .. constraints.dim/2)
+        auto dim = constraints.dim;
+        foreach(i; 0 .. (dim/2 + (dim & 1)))
         {
             auto constraint = (*constraints)[2*i];
             if (!evaluateConstraint(constraint,ti,sc,paramscope,dedargs,fd))
