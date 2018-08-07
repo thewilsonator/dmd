@@ -2736,7 +2736,7 @@ extern (C++) FuncDeclaration resolveFuncCall(const ref Loc loc, Scope* sc, Dsymb
                     .errorSupplemental(td.loc, "`%s`", td.toCharsNoConstraint());
                     Loc loc = Loc.initial;
                     enum strfmt   = "        %s satisfied: %.*s";
-                    enum otherfmt = "        %s satisfied: `%s`"
+                    enum otherfmt = "        %s satisfied: `%s`";
                     foreach(i; 0 .. td.constraints.dim/2)
                     {
                         auto expr = (*td.constraints)[2*i];
