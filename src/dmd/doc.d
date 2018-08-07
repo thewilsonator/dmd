@@ -1215,8 +1215,8 @@ private void toDocBuffer(Dsymbol s, OutBuffer* buf, Scope* sc)
                 {
                     buf.writestring("$(DDOC_CONSTRAINT ");
                 }
-
                 foreach(i; 0 .. td.constraints.dim/2)
+                //FIXME: how should do the docs for multiple constraints?
                 {
                     .toCBuffer((*td.constraints)[2*i], buf, &hgs);
                 }
