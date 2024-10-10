@@ -786,30 +786,24 @@ private void colorSyntaxHighlight(ref OutBuffer buf)
     for (size_t i = offset; i < buf.length; ++i)
     {
         char c = buf[i];
-        switch (c)
+        if (c != '`')
+            continue;
+        if (inBacktick)
         {
-            case '`':
-                if (inBacktick)
-                {
-                    inBacktick = false;
-                    OutBuffer codebuf;
-                    codebuf.write(buf[iCodeStart .. i]);
-                    codebuf.writeByte(0);
-                    // escape the contents, but do not perform highlighting except for DDOC_PSYMBOL
-                    colorHighlightCode(codebuf);
-                    buf.remove(iCodeStart, i - iCodeStart);
-                    immutable pre = "";
-                    i = buf.insert(iCodeStart, pre);
-                    i = buf.insert(i, codebuf[]);
-                    break;
-                }
-                inBacktick = true;
-                iCodeStart = i + 1;
-                break;
-
-            default:
-                break;
+            inBacktick = false;
+            OutBuffer codebuf;
+            codebuf.write(buf[iCodeStart .. i]);
+            codebuf.writeByte(0);
+            // escape the contents, but do not perform highlighting except for DDOC_PSYMBOL
+            colorHighlightCode(codebuf);
+            buf.remove(iCodeStart, i - iCodeStart);
+            immutable pre = "";
+            i = buf.insert(iCodeStart, pre);
+            i = buf.insert(i, codebuf[]);
+            break;
         }
+        inBacktick = true;
+        iCodeStart = i + 1;
     }
 }
 
