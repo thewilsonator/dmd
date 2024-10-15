@@ -2261,7 +2261,7 @@ Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                 Scope* sc2 = sc.push();
                 sc2.inDefaultArg = true;
                 Initializer iz = new ExpInitializer(e.loc, e);
-                iz = iz.initializerSemantic(sc2, fparam.type, INITnointerpret);
+                iz = iz.initializerSemantic(sc2, fparam.type, INITnointerpret, global.diag);
                 e = iz.initializerToExpression();
                 sc2.pop();
             }

@@ -31,7 +31,6 @@ import dmd.expression;
 import dmd.expressionsem;
 import dmd.func;
 import dmd.funcsem;
-import dmd.globals;
 import dmd.hdrgen;
 import dmd.id;
 import dmd.identifier;
@@ -104,7 +103,7 @@ Expression toAssocArrayLiteral(ArrayInitializer ai)
  *      `Initializer` with completed semantic analysis, `ErrorInitializer` if errors
  *      were encountered
  */
-Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedInterpret needInterpret)
+Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedInterpret needInterpret, const ref Diagnostics diag)
 {
     //printf("initializerSemantic() tx: %p %s\n", tx, tx.toChars());
     if (init.semanticDone)
@@ -164,7 +163,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
             {
                 // Convert initializer to Expression `ex`
                 auto tm = fieldType.addMod(t.mod);
-                auto iz = i.value[j].initializerSemantic(sc, tm, needInterpret);
+                auto iz = i.value[j].initializerSemantic(sc, tm, needInterpret, diag);
                 auto ex = iz.initializerToExpression(null, sc.inCfile);
                 if (ex.op != EXP.error)
                     i.value[j] = iz;
@@ -181,7 +180,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                 return err();
             sle.type = t;
             auto ie = new ExpInitializer(i.loc, sle);
-            return ie.initializerSemantic(sc, t, needInterpret);
+            return ie.initializerSemantic(sc, t, needInterpret, diag);
         }
         else if ((t.ty == Tdelegate || t.isPtrToFunction()) && i.value.length == 0)
         {
@@ -194,7 +193,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
             fd.endloc = i.loc;
             Expression e = new FuncExp(i.loc, fd);
             auto ie = new ExpInitializer(i.loc, e);
-            return ie.initializerSemantic(sc, t, needInterpret);
+            return ie.initializerSemantic(sc, t, needInterpret, diag);
         }
         if (t.ty != Terror)
             error(i.loc, "a struct is not a valid initializer for a `%s`", t.toChars());
@@ -232,7 +231,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                     return err();
                 }
                 auto ei = new ExpInitializer(e.loc, e);
-                return ei.initializerSemantic(sc, t, needInterpret);
+                return ei.initializerSemantic(sc, t, needInterpret, diag);
             }
 
         case Tpointer:
@@ -271,7 +270,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
             if (ei && !idx)
                 ei.expandTuples = true;
             auto tn = t.nextOf();
-            val = val.initializerSemantic(sc, tn, needInterpret);
+            val = val.initializerSemantic(sc, tn, needInterpret, diag);
             if (val.isErrorInitializer())
                 errors = true;
             ei = val.isExpInitializer();
@@ -350,7 +349,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
             sc = sc.endCTFE();
         if (i.exp.op == EXP.error)
             return err();
-        const olderrors = global.diag.errors;
+        const olderrors = diag.errors;
 
         /* ImportC: convert arrays to pointers, functions to pointers to functions
          */
@@ -372,7 +371,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
             {
                 i.exp = i.exp.implicitCastTo(sc, t);
             }
-            if (!global.diag.gag && olderrors != global.diag.errors)
+            if (!diag.gag && olderrors != diag.errors)
             {
                 return i;
             }
@@ -401,7 +400,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
             i.exp = i.exp.optimize(WANTvalue);
         }
 
-        if (!global.diag.gag && olderrors != global.diag.errors)
+        if (!diag.gag && olderrors != diag.errors)
         {
             return i; // Failed, suppress duplicate error messages
         }
@@ -582,9 +581,9 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                 }
             }
             Type et = i.exp.type;
-            const errors = global.diag.startGagging();
+            const errors = diag.startGagging();
             i.exp = i.exp.implicitCastTo(sc, t);
-            if (global.diag.endGagging(errors))
+            if (diag.endGagging(errors))
                 error(currExp.loc, "cannot implicitly convert expression `%s` of type `%s` to `%s`", currExp.toChars(), et.toChars(), t.toChars());
         }
         }
@@ -724,7 +723,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                      */
                     if (representsStruct(ix.isExpInitializer(), tns)) // initializer represents the entire struct
                     {
-                        si.addInit(field.ident, initializerSemantic(ix, sc, tn, needInterpret));
+                        si.addInit(field.ident, initializerSemantic(ix, sc, tn, needInterpret, diag));
                         ++index;
                     }
                     else                                // field initializers for struct
@@ -928,7 +927,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                      */
                     if (representsStruct(ix.isExpInitializer(), tns)) // initializer represents the entire struct
                     {
-                        si.addInit(field.ident, initializerSemantic(ix, sc, tn, needInterpret));
+                        si.addInit(field.ident, initializerSemantic(ix, sc, tn, needInterpret, diag));
                         ++index;
                     }
                     else                                // field initializers for struct
@@ -940,7 +939,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                     ++index;
                 }
             }
-            return initializerSemantic(si, sc, t, needInterpret);
+            return initializerSemantic(si, sc, t, needInterpret, diag);
         }
         else if (auto ta = t.isTypeSArray())
         {
@@ -954,7 +953,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                 if (ExpInitializer ei = isBraceExpression())
                 {
                     if (ei.exp.isStringExp())
-                        return ei.initializerSemantic(sc, t, needInterpret);
+                        return ei.initializerSemantic(sc, t, needInterpret, diag);
                 }
             }
 
@@ -987,7 +986,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                         auto ain = new ArrayInitializer(ci.loc);
                         ain.addInit(null, di.initializer);
                         ix = ain;
-                        ai.addInit((*dlist)[0].exp, initializerSemantic(ix, sc, tn, needInterpret));
+                        ai.addInit((*dlist)[0].exp, initializerSemantic(ix, sc, tn, needInterpret, diag));
                         ++index;
                     }
                     else if (tns && ix.isExpInitializer())
@@ -997,7 +996,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                          */
                         if (representsStruct(ix.isExpInitializer(), tns)) // initializer represents the entire struct
                         {
-                            ai.addInit((*dlist)[0].exp, initializerSemantic(ix, sc, tn, needInterpret));
+                            ai.addInit((*dlist)[0].exp, initializerSemantic(ix, sc, tn, needInterpret, diag));
                             ++index;
                         }
                         else                                // field initializers for struct
@@ -1005,7 +1004,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                     }
                     else
                     {
-                        ai.addInit((*dlist)[0].exp, initializerSemantic(ix, sc, tn, needInterpret));
+                        ai.addInit((*dlist)[0].exp, initializerSemantic(ix, sc, tn, needInterpret, diag));
                         ++index;
                     }
                 }
@@ -1027,7 +1026,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                      */
                     if (representsStruct(di.initializer.isExpInitializer(), tns)) // initializer represents the entire struct
                     {
-                        ai.addInit(null, initializerSemantic(di.initializer, sc, tn, needInterpret));
+                        ai.addInit(null, initializerSemantic(di.initializer, sc, tn, needInterpret, diag));
                         ++index;
                     }
                     else                                // field initializers for struct
@@ -1035,11 +1034,11 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                 }
                 else
                 {
-                    ai.addInit(null, initializerSemantic(di.initializer, sc, tn, needInterpret));
+                    ai.addInit(null, initializerSemantic(di.initializer, sc, tn, needInterpret, diag));
                     ++index;
                 }
             }
-            return initializerSemantic(ai, sc, tx, needInterpret);
+            return initializerSemantic(ai, sc, tx, needInterpret, diag);
         }
         else if (ExpInitializer ei = isBraceExpression())
         {

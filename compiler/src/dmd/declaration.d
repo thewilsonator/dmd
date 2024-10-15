@@ -1110,7 +1110,7 @@ extern (C++) class VarDeclaration : Declaration
         if (_scope)
         {
             inuse++;
-            _init = _init.initializerSemantic(_scope, type, INITinterpret);
+            _init = _init.initializerSemantic(_scope, type, INITinterpret, global.diag);
             import dmd.semantic2 : lowerStaticAAs;
             lowerStaticAAs(this, _scope);
             _scope = null;

@@ -2079,7 +2079,7 @@ public:
                 if (v._scope)
                 {
                     v.inuse++;
-                    v._init = v._init.initializerSemantic(v._scope, v.type, INITinterpret); // might not be run on aggregate members
+                    v._init = v._init.initializerSemantic(v._scope, v.type, INITinterpret, global.diag); // might not be run on aggregate members
                     v.inuse--;
                 }
                 e = v._init.initializerToExpression(v.type);

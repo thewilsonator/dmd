@@ -4649,7 +4649,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             printf("CompoundLiteralExp::semantic('%s')\n", cle.toChars());
         }
         Type t = cle.type.typeSemantic(cle.loc, sc);
-        auto init = initializerSemantic(cle.initializer, sc, t, INITnointerpret);
+        auto init = initializerSemantic(cle.initializer, sc, t, INITnointerpret, global.diag);
         auto e = initializerToExpression(init, t, sc.inCfile);
         if (!e)
         {
@@ -5185,7 +5185,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
                             v._init.isVoidInitializer() || v.semanticRun >= PASS.semantic2done)
                             continue;
                         v.inuse++;
-                        v._init = v._init.initializerSemantic(v._scope, v.type, INITinterpret);
+                        v._init = v._init.initializerSemantic(v._scope, v.type, INITinterpret, global.diag);
                         import dmd.semantic2 : lowerStaticAAs;
                         lowerStaticAAs(v, sc);
                         v.inuse--;

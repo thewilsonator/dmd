@@ -360,7 +360,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx,
                                 NeedInterpret needInterpret)
 {
     import dmd.initsem;
-    return dmd.initsem.initializerSemantic(init, sc, tx, needInterpret);
+    return dmd.initsem.initializerSemantic(init, sc, tx, needInterpret, global.diag);
 }
 
 Expression initializerToExpression(Initializer init, Type itype = null, const
