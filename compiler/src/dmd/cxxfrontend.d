@@ -283,6 +283,12 @@ Expression expressionSemantic(Expression e, Scope* sc)
     return dmd.expressionsem.expressionSemantic(e, sc);
 }
 
+bool needsCodegen(TemplateInstance ti)
+{
+    import dmd.expressionsem : needsCodegen;
+    return dmd.expressionsem.needsCodegen(ti);
+}
+
 bool fill(StructDeclaration sd, Loc loc,
           ref Expressions elements, bool ctorinit)
 {

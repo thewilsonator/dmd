@@ -1840,7 +1840,6 @@ public:
     Identifier* getIdent() final override;
     bool equalsx(TemplateInstance* ti);
     bool isDiscardable();
-    bool needsCodegen();
     void accept(Visitor* v) override;
 };
 

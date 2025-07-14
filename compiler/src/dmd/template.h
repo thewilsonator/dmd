@@ -273,7 +273,6 @@ public:
     Identifier *getIdent() override final;
 
     bool isDiscardable();
-    bool needsCodegen();
 
     void accept(Visitor *v) override { v->visit(this); }
 };
