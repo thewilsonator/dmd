@@ -6437,8 +6437,12 @@ bool determineFields(AggregateDeclaration ad)
 
         if (v.storage_class & (STC.static_ | STC.extern_ | STC.tls | STC.gshared | STC.manifest | STC.ctfe | STC.templateparameter))
             return 0;
-        if (!v.isField() || v.semanticRun < PASS.semanticdone)
+        if (!v.isField())
             return 1;   // unresolvable forward reference
+        if (v.semanticRun < PASS.semanticdone)
+            v.dsymbolSemantic(null);
+        if (v.errors)
+            return 1;
 
         ad.fields.push(v);
 
