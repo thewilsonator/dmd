@@ -5688,59 +5688,67 @@ private extern(C++) class AddMemberVisitor : Visitor
         if (dsym.isAnonymous()) // no name, so can't add it to symbol table
             return;
 
-        if (!sds.symtabInsert(dsym)) // if name is already defined
+        void checkPropertyRedefinition()
         {
-            if (dsym.isAliasDeclaration() && !dsym._scope)
-                dsym.setScope(sc);
-            Dsymbol s2 = sds.symtabLookup(dsym, dsym.ident);
-            /* https://issues.dlang.org/show_bug.cgi?id=17434
-             *
-             * If we are trying to add an import to the symbol table
-             * that has already been introduced, then keep the one with
-             * larger visibility. This is fine for imports because if
-             * we have multiple imports of the same file, if a single one
-             * is public then the symbol is reachable.
-             */
-            if (auto i1 = dsym.isImport())
+            if (sds.isAggregateDeclaration() || sds.isEnumDeclaration())
             {
-                if (auto i2 = s2.isImport())
+                if (dsym.ident == Id.__sizeof ||
+                    !(sc && sc.inCfile) && (dsym.ident == Id.__xalignof || dsym.ident == Id._mangleof))
                 {
-                    if (sc.explicitVisibility && sc.visibility > i2.visibility)
-                        sds.symtab.update(dsym);
+                    .error(dsym.loc, "%s `%s` `.%s` property cannot be redefined", dsym.kind, dsym.toPrettyChars, dsym.ident.toChars());
+                    dsym.errors = true;
                 }
             }
-
-            // If using C tag/prototype/forward declaration rules
-            if (sc && sc.inCfile && !dsym.isImport())
-            // When merging master, replace with: if (sc && sc.inCfile && !dsym.isImport())
-            {
-                if (handleTagSymbols(*sc, dsym, s2, sds))
-                    return;
-                if (handleSymbolRedeclarations(*sc, dsym, s2, sds))
-                    return;
-
-                sds.multiplyDefined(Loc.initial, dsym, s2);  // ImportC doesn't allow overloading
-                dsym.errors = true;
-                return;
-            }
-
-            if (!s2.overloadInsert(dsym))
-            {
-                if (auto _td = s2.isTemplateDeclaration())
-                    _td.computeOneMember();
-                sds.multiplyDefined(Loc.initial, dsym, s2);
-                dsym.errors = true;
-            }
         }
-        if (sds.isAggregateDeclaration() || sds.isEnumDeclaration())
+        if (sds.symtabInsert(dsym))
         {
-            if (dsym.ident == Id.__sizeof ||
-                !(sc && sc.inCfile) && (dsym.ident == Id.__xalignof || dsym.ident == Id._mangleof))
+            checkPropertyRedefinition();
+            return;
+        }
+        // if name is already defined
+
+        if (dsym.isAliasDeclaration() && !dsym._scope)
+            dsym.setScope(sc);
+        Dsymbol s2 = sds.symtabLookup(dsym, dsym.ident);
+        /* https://issues.dlang.org/show_bug.cgi?id=17434
+         *
+         * If we are trying to add an import to the symbol table
+         * that has already been introduced, then keep the one with
+         * larger visibility. This is fine for imports because if
+         * we have multiple imports of the same file, if a single one
+         * is public then the symbol is reachable.
+         */
+        if (auto i1 = dsym.isImport())
+        {
+            if (auto i2 = s2.isImport())
             {
-                .error(dsym.loc, "%s `%s` `.%s` property cannot be redefined", dsym.kind, dsym.toPrettyChars, dsym.ident.toChars());
-                dsym.errors = true;
+                if (sc.explicitVisibility && sc.visibility > i2.visibility)
+                    sds.symtab.update(dsym);
             }
         }
+
+        // If using C tag/prototype/forward declaration rules
+        if (sc && sc.inCfile && !dsym.isImport())
+        // When merging master, replace with: if (sc && sc.inCfile && !dsym.isImport())
+        {
+            if (handleTagSymbols(*sc, dsym, s2, sds))
+                return;
+            if (handleSymbolRedeclarations(*sc, dsym, s2, sds))
+                return;
+
+            sds.multiplyDefined(Loc.initial, dsym, s2);  // ImportC doesn't allow overloading
+            dsym.errors = true;
+            return;
+        }
+
+        if (!s2.overloadInsert(dsym))
+        {
+            if (auto _td = s2.isTemplateDeclaration())
+                _td.computeOneMember();
+            sds.multiplyDefined(Loc.initial, dsym, s2);
+            dsym.errors = true;
+        }
+        checkPropertyRedefinition();
     }
 
 
